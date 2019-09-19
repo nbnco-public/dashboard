@@ -343,6 +343,9 @@ const getters = {
   },
   hasTerminalAccess (state, getters) {
     return get(state, 'cfg.features.terminalEnabled', false) && getters.canManageTerminal
+  },
+  initialNewShootResource (state, getters) {
+    return getters['shoots/initialNewShootResource']
   }
 }
 
