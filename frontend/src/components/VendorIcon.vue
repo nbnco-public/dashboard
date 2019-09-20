@@ -65,8 +65,14 @@ export default {
           return require('@/assets/alicloud-white.svg')
         case 'digital-ocean':
           return require('@/assets/digital-ocean.svg')
+        case 'digital-ocean-blue':
+          return require('@/assets/digital-ocean-blue.svg')
+        case 'packet':
+          return require('@/assets/packet.svg')
         case 'vmware':
           return require('@/assets/vmware.svg')
+        case 'vmware-blue':
+          return require('@/assets/vmware-blue.svg')
         case 'china-telecom':
           return require('@/assets/china-telecom.svg')
         case 'coreos':

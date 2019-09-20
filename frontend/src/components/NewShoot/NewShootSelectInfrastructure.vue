@@ -33,6 +33,36 @@ limitations under the License.
         </v-flex>
       </v-layout>
     </v-card>
+    <v-card class="select_infra_card select_infra_card_disabled elevation-1">
+      <v-layout align-center justify-center column>
+        <v-flex>
+          <infra-icon value="packet" :height="60"></infra-icon>
+        </v-flex>
+        <v-flex mt-2>
+          <span class="subheading grey--text">packet</span>
+        </v-flex>
+      </v-layout>
+    </v-card>
+    <v-card class="select_infra_card select_infra_card_disabled elevation-1">
+      <v-layout align-center justify-center column>
+        <v-flex>
+          <infra-icon value="vmware-blue" :height="60"></infra-icon>
+        </v-flex>
+        <v-flex mt-2>
+          <span class="subheading grey--text">vmware</span>
+        </v-flex>
+      </v-layout>
+    </v-card>
+    <v-card class="select_infra_card select_infra_card_disabled elevation-1">
+      <v-layout align-center justify-center column>
+        <v-flex>
+          <infra-icon value="digital-ocean-blue" :height="60"></infra-icon>
+        </v-flex>
+        <v-flex mt-2>
+          <span class="subheading grey--text">DigitalOcean</span>
+        </v-flex>
+      </v-layout>
+    </v-card>
   </v-layout>
 </template>
 
@@ -96,6 +126,13 @@ export default {
     min-width: 120px;
     filter: grayscale(70%);
     background-color: #f9f9f9;
+  }
+
+  .select_infra_card_disabled {
+    cursor: default;
+    opacity: 0.7 !important;
+    filter: grayscale(50%) !important;
+    background-color:  #f9f9f9 !important;
   }
 
   .select_infra_card:hover {
