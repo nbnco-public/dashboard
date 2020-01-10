@@ -32,7 +32,7 @@ limitations under the License.
       target="shoot"
       :description="shootTerminalDescription"
       :buttonDescription="shootTerminalButtonDescription"
-      :disabled="isShootHibernated"
+      :disabled="!isAdmin && isShootHibernated"
       >
     </terminal-list-tile>
 
@@ -179,7 +179,9 @@ export default {
   mixins: [shootItem],
   computed: {
     ...mapGetters([
-      'hasShootTerminalAccess'
+      'hasShootTerminalAccess',
+      'isAdmin',
+      'hasControlPlaneTerminalAccess'
     ]),
     ...mapState([
       'cfg'
@@ -243,7 +245,7 @@ export default {
       return this.shootTerminalDescription
     },
     shootTerminalDescription () {
-      return 'Open terminal into cluster'
+      return this.hasControlPlaneTerminalAccess ? 'Open terminal into cluster or cluster\'s control plane' : 'Open terminal into cluster'
     },
     isAnyTileVisible () {
       return this.isDashboardTileVisible || this.isCredentialsTileVisible || this.isKubeconfigTileVisible || this.isTerminalTileVisible

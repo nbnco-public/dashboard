@@ -28,13 +28,6 @@ limitations under the License.
       </v-flex>
 
       <v-flex md6>
-        <v-card v-if="canRenderControlPlane" class="mb-3">
-          <v-card-title class="subheading white--text cyan darken-2">
-            Control Plane
-          </v-card-title>
-          <shoot-control-plane :shootItem="item"></shoot-control-plane>
-        </v-card>
-
         <v-card>
           <v-card-title class="subheading white--text cyan darken-2">
             Access
@@ -63,7 +56,6 @@ limitations under the License.
 
 <script>
 import { mapGetters } from 'vuex'
-import ShootControlPlane from '@/components/ShootDetails/ShootControlPlane'
 import ShootAccessCard from '@/components/ShootDetails/ShootAccessCard'
 import ShootJournalsCard from '@/components/ShootDetails/ShootJournalsCard'
 import ShootMonitoringCard from '@/components/ShootDetails/ShootMonitoringCard'
@@ -73,14 +65,12 @@ import ShootInfrastructureCard from '@/components/ShootDetails/ShootInfrastructu
 import ShootLifecycleCard from '@/components/ShootDetails/ShootLifecycleCard'
 import ShootExternalToolsCard from '@/components/ShootDetails/ShootExternalToolsCard'
 import get from 'lodash/get'
-import isEmpty from 'lodash/isEmpty'
 
 import 'codemirror/mode/yaml/yaml.js'
 
 export default {
   name: 'shoot-item',
   components: {
-    ShootControlPlane,
     ShootDetailsCard,
     ShootInfrastructureCard,
     ShootLifecycleCard,
@@ -94,8 +84,7 @@ export default {
     ...mapGetters([
       'shootByNamespaceAndName',
       'journalsByNamespaceAndName',
-      'isAdmin',
-      'hasControlPlaneTerminalAccess'
+      'isAdmin'
     ]),
     value () {
       return this.shootByNamespaceAndName(this.$route.params)
@@ -112,9 +101,6 @@ export default {
     journals () {
       const params = this.$route.params
       return this.journalsByNamespaceAndName(params)
-    },
-    canRenderControlPlane () {
-      return !isEmpty(this.item) && this.hasControlPlaneTerminalAccess
     }
   },
   mounted () {

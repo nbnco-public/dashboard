@@ -26,6 +26,7 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
   const aud = [ 'gardener' ]
   const project = 'foo'
   const namespace = `garden-${project}`
+  const name = 'shoot1'
   const seedName = 'infra1-seed'
   const kind = 'infra1'
   const region = 'foo-east'
@@ -33,7 +34,7 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
 
   describe('garden', function () {
     const target = 'garden'
-    const name = 'term-garden-0815'
+    const terminalName = 'term-garden-0815'
     const hostNamespace = 'term-host-0815'
 
     it('should create a terminal resource', async function () {
@@ -41,14 +42,20 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
       const bearer = await user.bearer
 
       common.stub.getCloudProfiles(sandbox)
-      k8s.stub.createTerminal({ bearer, username, namespace, target, seedName })
+      k8s.stub.createTerminal({ bearer, username, namespace, seedName })
 
       const res = await agent
-        .post(`/api/namespaces/${namespace}/terminals/${target}`)
+        .post('/api/terminals')
         .set('cookie', await user.cookie)
         .send({
           method: 'create',
-          params: {}
+          params: {
+            coordinate: {
+              name,
+              namespace,
+              target
+            }
+          }
         })
 
       expect(res).to.have.status(200)
@@ -56,7 +63,7 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
       expect(res.body).to.eql({
         metadata: {
           namespace,
-          name
+          name: terminalName
         },
         hostCluster: {
           kubeApiServer: `k-g.${ingressDomain}`,
@@ -92,7 +99,7 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
       const terminal = {
         metadata: {
           namespace,
-          name,
+          name: terminalName,
           annotations: {
             'garden.sapcloud.io/createdBy': username
           }
@@ -129,23 +136,25 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
       watchStub.onSecondCall().callsFake(() => serviceAccountReconnector.start())
 
       const res = await agent
-        .post(`/api/namespaces/${namespace}/terminals/${target}`)
+        .post('/api/terminals')
         .set('cookie', await user.cookie)
         .send({
           method: 'fetch',
           params: {
-            namespace,
-            name
+            coordinate: {
+              target
+            },
+            name: terminalName,
+            namespace
           }
         })
-
       expect(res).to.have.status(200)
       expect(res).to.be.json
       expect(watchStub).to.have.been.calledTwice
       expect(res.body).to.eql({
         metadata: {
           namespace,
-          name
+          name: terminalName
         },
         hostCluster: {
           token,
@@ -164,8 +173,18 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
       k8s.stub.getTerminalConfig({ bearer, namespace, target })
 
       const res = await agent
-        .get(`/api/namespaces/${namespace}/terminals/${target}/config`)
+        .post('/api/terminals')
         .set('cookie', await user.cookie)
+        .send({
+          method: 'config',
+          params: {
+            coordinate: {
+              name,
+              namespace,
+              target
+            }
+          }
+        })
 
       expect(res).to.have.status(200)
       expect(res).to.be.json
@@ -176,15 +195,18 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
       const user = auth.createUser({ id, aud })
       const bearer = await user.bearer
 
-      k8s.stub.keepAliveTerminal({ bearer, username, namespace, name, target })
+      k8s.stub.keepAliveTerminal({ bearer, username, namespace, name: terminalName, target })
 
       const res = await agent
-        .post(`/api/namespaces/${namespace}/terminals/${target}`)
+        .post('/api/terminals')
         .set('cookie', await user.cookie)
         .send({
           method: 'heartbeat',
           params: {
-            name,
+            coordinate: {
+              target
+            },
+            name: terminalName,
             namespace
           }
         })
@@ -198,15 +220,18 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
       const user = auth.createUser({ id, aud })
       const bearer = await user.bearer
 
-      k8s.stub.deleteTerminal({ bearer, username, namespace, name, target })
+      k8s.stub.deleteTerminal({ bearer, username, namespace, name: terminalName, target })
 
       const res = await agent
-        .post(`/api/namespaces/${namespace}/terminals/${target}`)
+        .post('/api/terminals')
         .set('cookie', await user.cookie)
         .send({
           method: 'remove',
           params: {
-            name,
+            coordinate: {
+              target
+            },
+            name: terminalName,
             namespace
           }
         })
@@ -214,8 +239,46 @@ module.exports = function info ({ agent, sandbox, k8s, auth }) {
       expect(res).to.have.status(200)
       expect(res).to.be.json
       expect(res.body).to.eql({
-        name,
+        name: terminalName,
         namespace })
+    })
+
+    it('should list terminal resources', async function () {
+      const user = auth.createUser({ id, aud })
+      const bearer = await user.bearer
+
+      k8s.stub.listTerminalResources({ bearer, username, namespace, name })
+
+      const res = await agent
+        .post('/api/terminals')
+        .set('cookie', await user.cookie)
+        .send({
+          method: 'list',
+          params: {
+            coordinate: {
+              target,
+              namespace
+            },
+            name: terminalName,
+            namespace
+          }
+        })
+
+      expect(res).to.have.status(200)
+      expect(res).to.be.json
+      expect(res.body).to.eql([{
+        'metadata': {
+          name: 'foo1',
+          namespace: 'foo',
+          identifier: '1'
+        }
+      }, {
+        'metadata': {
+          name: 'foo2',
+          namespace: 'foo',
+          identifier: '2'
+        }
+      }])
     })
   })
 }
