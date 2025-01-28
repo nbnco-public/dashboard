@@ -7,21 +7,18 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    vendor="infoblox-dns"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
     create-title="Add new Infoblox Secret"
     replace-title="Replace Infoblox Secret"
   >
     <template #secret-slot>
       <div>
         <v-text-field
-          ref="infobloxUsername"
           v-model="infobloxUsername"
           color="primary"
           label="Infoblox Username"
-          :error-messages="getErrorMessages('infobloxUsername')"
+          :error-messages="getErrorMessages(v$.infobloxUsername)"
           variant="underlined"
           @update:model-value="v$.infobloxUsername.$touch()"
           @blur="v$.infobloxUsername.$touch()"
@@ -32,7 +29,7 @@ SPDX-License-Identifier: Apache-2.0
           v-model="infobloxPassword"
           color="primary"
           label="Infoblox Password"
-          :error-messages="getErrorMessages('infobloxPassword')"
+          :error-messages="getErrorMessages(v$.infobloxPassword)"
           :append-icon="hideInfobloxPassword ? 'mdi-eye' : 'mdi-eye-off'"
           :type="hideInfobloxPassword ? 'password' : 'text'"
           variant="underlined"
@@ -58,19 +55,10 @@ import { required } from '@vuelidate/validators'
 
 import GSecretDialog from '@/components/Secrets/GSecretDialog'
 
-import {
-  getValidationErrors,
-  setDelayedInputFocus,
-} from '@/utils'
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
 
-const validationErrors = {
-  infobloxUsername: {
-    required: 'You can\'t leave this empty.',
-  },
-  infobloxPassword: {
-    required: 'You can\'t leave this empty.',
-  },
-}
+import { withFieldName } from '@/utils/validators'
+import { getErrorMessages } from '@/utils'
 
 export default {
   components: {
@@ -81,7 +69,7 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
   },
@@ -89,21 +77,36 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const {
+      infobloxUsername,
+      infobloxPassword,
+    } = secretStringDataRefs({
+      USERNAME: 'infobloxUsername',
+      PASSWORD: 'infobloxPassword',
+    })
+
     return {
+      infobloxUsername,
+      infobloxPassword,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      infobloxUsername: undefined,
-      infobloxPassword: undefined,
       hideInfobloxPassword: true,
-      validationErrors,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      infobloxUsername: withFieldName('Username', {
+        required,
+      }),
+      infobloxPassword: withFieldName('Password', {
+        required,
+      }),
+    }
   },
   computed: {
     visible: {
@@ -117,51 +120,12 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    secretData () {
-      return {
-        USERNAME: this.infobloxUsername,
-        PASSWORD: this.infobloxPassword,
-      }
-    },
-    validators () {
-      const validators = {
-        infobloxUsername: {
-          required,
-        },
-        infobloxPassword: {
-          required,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
   },
-  watch: {
-    value: function (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
   methods: {
-    reset () {
-      this.v$.$reset()
-
-      this.infobloxUsername = ''
-      this.infobloxPassword = ''
-
-      if (!this.isCreateMode) {
-        if (this.secret.data) {
-          this.infobloxUsername = this.secret.data.USERNAME
-        }
-        setDelayedInputFocus(this, 'infobloxUsername')
-      }
-    },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>

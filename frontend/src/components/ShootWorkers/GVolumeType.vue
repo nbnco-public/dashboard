@@ -14,7 +14,7 @@ SPDX-License-Identifier: Apache-2.0
       :items="volumeTypeItems"
       item-title="name"
       item-value="name"
-      :error-messages="getErrorMessages('worker.volume.type')"
+      :error-messages="getErrorMessages(v$.worker.volume.type)"
       label="Volume Type"
       :hint="hint"
       persistent-hint
@@ -35,7 +35,7 @@ SPDX-License-Identifier: Apache-2.0
       v-model.number="workerIops"
       class="ml-1"
       color="primary"
-      :error-messages="getErrorMessages('workerIops')"
+      :error-messages="getErrorMessages(v$.workerIops)"
       type="number"
       min="100"
       label="IOPS"
@@ -57,15 +57,14 @@ import { useVuelidate } from '@vuelidate/core'
 
 import { useCloudProfileStore } from '@/store/cloudProfile'
 
-import { getValidationErrors } from '@/utils'
-import { getWorkerProviderConfig } from '@/utils/createShoot'
+import { getErrorMessages } from '@/utils'
+import { getWorkerProviderConfig } from '@/utils/shoot'
+import { withFieldName } from '@/utils/validators'
 
-import {
-  find,
-  get,
-  set,
-  unset,
-} from '@/lodash'
+import find from 'lodash/find'
+import get from 'lodash/get'
+import set from 'lodash/set'
+import unset from 'lodash/unset'
 
 export default {
   props: {
@@ -78,6 +77,9 @@ export default {
       default: () => [],
     },
     cloudProfileName: {
+      type: String,
+    },
+    fieldName: {
       type: String,
     },
   },
@@ -95,41 +97,23 @@ export default {
     }
   },
   validations () {
-    return this.validators
+    return {
+      worker: {
+        volume: {
+          type: withFieldName(() => this.fieldName, {
+            required,
+          }),
+        },
+      },
+      workerIops: withFieldName(() => `${this.fieldName} IOPS`, {
+        required: requiredIf(() => {
+          return this.isAWS && this.worker.volume.type === 'io1'
+        }),
+        minValue: minValue(100),
+      }),
+    }
   },
   computed: {
-    validators () {
-      return {
-        worker: {
-          volume: {
-            type: {
-              required,
-            },
-          },
-        },
-        workerIops: {
-          required: requiredIf(() => {
-            return this.isAWS && this.worker.volume.type === 'io1'
-          }),
-          minValue: minValue(100),
-        },
-      }
-    },
-    validationErrors () {
-      return {
-        worker: {
-          volume: {
-            type: {
-              required: 'Volume Type is required',
-            },
-          },
-        },
-        workerIops: {
-          required: 'IOPS is required for volumes of type io1',
-          minValue: 'Minimum IOPS is 100',
-        },
-      }
-    },
     volumeTypeItems () {
       const volumeTypes = this.volumeTypes.slice()
       if (this.notInCloudProfile) {
@@ -151,20 +135,17 @@ export default {
     },
     isAWS () {
       const cloudProfile = this.cloudProfileByName(this.cloudProfileName)
-      return get(cloudProfile, 'metadata.cloudProviderKind') === 'aws'
+      return get(cloudProfile, ['metadata', 'providerType']) === 'aws'
     },
   },
   mounted () {
-    this.workerIops = get(this.worker, 'providerConfig.volume.iops')
+    this.workerIops = get(this.worker, ['providerConfig', 'volume', 'iops'])
     this.v$.$touch()
   },
   methods: {
     ...mapActions(useCloudProfileStore, [
       'cloudProfileByName',
     ]),
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
     onInputVolumeType () {
       this.v$.worker.volume.type.$touch()
       this.$emit('updateVolumeType')
@@ -175,13 +156,14 @@ export default {
         if (!this.worker.providerConfig) {
           this.worker.providerConfig = getWorkerProviderConfig('aws')
         }
-        set(this.worker.providerConfig, 'volume.iops', iopsValue)
+        set(this.worker.providerConfig, ['volume', 'iops'], iopsValue)
       } else {
-        unset(this.worker.providerConfig, 'volume.iops')
+        unset(this.worker.providerConfig, ['volume', 'iops'])
       }
       this.v$.workerIops.$touch()
       this.$emit('updateVolumeType')
     },
+    getErrorMessages,
   },
 }
 </script>

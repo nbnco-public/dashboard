@@ -8,6 +8,7 @@ SPDX-License-Identifier: Apache-2.0
   <v-dialog
     v-model="visible"
     max-width="850"
+    scrollable
   >
     <v-card>
       <g-toolbar
@@ -37,7 +38,7 @@ SPDX-License-Identifier: Apache-2.0
                   v-model.trim="name"
                   color="primary"
                   label="Secret Name"
-                  :error-messages="getErrorMessages('name')"
+                  :error-messages="getErrorMessages(v$.name)"
                   variant="underlined"
                   @update:model-value="v$.name.$touch()"
                   @blur="v$.name.$touch()"
@@ -49,16 +50,6 @@ SPDX-License-Identifier: Apache-2.0
                 </div>
               </template>
             </div>
-
-            <div v-if="cloudProfiles.length !== 1 && isInfrastructureSecret">
-              <g-cloud-profile
-                ref="cloudProfile"
-                v-model="cloudProfileName"
-                :create-mode="isCreateMode"
-                :cloud-profiles="cloudProfiles"
-              />
-            </div>
-
             <slot name="secret-slot" />
             <g-message
               v-model:message="errorMessage"
@@ -69,30 +60,34 @@ SPDX-License-Identifier: Apache-2.0
           <v-slide-x-reverse-transition>
             <div
               v-if="helpVisible"
-              class="pa-3 ml-3 help"
-              :style="helpStyle"
+              class="ml-6 help-container"
+              :style="helpContainerStyles"
             >
-              <slot name="help-slot" />
+              <div class="help-content">
+                <slot name="help-slot" />
+              </div>
             </div>
           </v-slide-x-reverse-transition>
         </div>
       </v-card-text>
-      <v-alert
-        :model-value="!isCreateMode && relatedShootCount > 0"
-        type="warning"
-        rounded="0"
-        class="mb-2"
-      >
-        This secret is used by {{ relatedShootCount }} clusters. The new secret should be part of the same account as the one that gets replaced.
-      </v-alert>
-      <v-alert
-        :model-value="!isCreateMode && relatedShootCount > 0"
-        type="warning"
-        rounded="0"
-        class="mb-2"
-      >
-        Clusters will only start using the new secret after they got reconciled. Therefore, wait until all clusters using the secret are reconciled before you disable the old secret in your infrastructure account. Otherwise the clusters will no longer function.
-      </v-alert>
+      <div>
+        <v-alert
+          :model-value="!isCreateMode && relatedShootCount > 0"
+          type="warning"
+          rounded="0"
+          class="mb-2"
+        >
+          This secret is used by {{ relatedShootCount }} clusters. The new secret should be part of the same account as the one that gets replaced.
+        </v-alert>
+        <v-alert
+          :model-value="!isCreateMode && relatedShootCount > 0"
+          type="warning"
+          rounded="0"
+          class="mb-2"
+        >
+          Clusters will only start using the new secret after they got reconciled. Therefore, wait until all clusters using the secret are reconciled before you disable the old secret in your infrastructure account. Otherwise the clusters will no longer function.
+        </v-alert>
+      </div>
       <v-divider />
       <v-card-actions>
         <v-spacer />
@@ -105,7 +100,6 @@ SPDX-License-Identifier: Apache-2.0
         <v-btn
           variant="text"
           color="primary"
-          :disabled="!valid"
           @click="submit"
         >
           {{ submitButtonText }}
@@ -126,52 +120,38 @@ import {
   maxLength,
 } from '@vuelidate/validators'
 
-import { useSecretStore } from '@/store/secret'
-import { useAuthzStore } from '@/store/authz'
-import { useCloudProfileStore } from '@/store/cloudProfile'
+import { useCredentialStore } from '@/store/credential'
 import { useGardenerExtensionStore } from '@/store/gardenerExtension'
 import { useShootStore } from '@/store/shoot'
 
 import GToolbar from '@/components/GToolbar.vue'
 import GMessage from '@/components/GMessage'
-import GCloudProfile from '@/components/GCloudProfile'
 
+import { useCredentialContext } from '@/composables/useCredentialContext'
+
+import {
+  messageFromErrors,
+  withFieldName,
+  unique,
+  lowerCaseAlphaNumHyphen,
+  noStartEndHyphen,
+} from '@/utils/validators'
 import {
   errorDetailsFromError,
   isConflict,
 } from '@/utils/error'
 import {
-  getValidationErrors,
+  getErrorMessages,
   setDelayedInputFocus,
   setInputFocus,
 } from '@/utils'
-import {
-  unique,
-  resourceName,
-} from '@/utils/validators'
 
-import {
-  cloneDeep,
-  get,
-  map,
-  head,
-  sortBy,
-  filter,
-  includes,
-} from '@/lodash'
-
-const validationErrors = {
-  name: {
-    required: 'You can\'t leave this empty.',
-    maxLength: 'It exceeds the maximum length of 128 characters.',
-    resourceName: 'Please use only lowercase alphanumeric characters and hyphen',
-    unique: 'Name is taken. Try another.',
-  },
-}
+import includes from 'lodash/includes'
+import filter from 'lodash/filter'
+import get from 'lodash/get'
 
 export default {
   components: {
-    GCloudProfile,
     GMessage,
     GToolbar,
   },
@@ -181,15 +161,13 @@ export default {
       type: Boolean,
       required: true,
     },
-    data: {
+    secretValidations: {
+      // need to pass nested validation object which shares scope,
+      // as v$ is part of secretValidations but not vice versa
       type: Object,
       required: true,
     },
-    dataValid: {
-      type: Boolean,
-      required: true,
-    },
-    vendor: {
+    providerType: {
       type: String,
       required: true,
     },
@@ -201,7 +179,7 @@ export default {
       type: String,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
   },
@@ -210,48 +188,62 @@ export default {
     'cloud-profile-name',
   ],
   setup () {
+    const { createSecretBindingManifest,
+      setSecretBindingManifest,
+      secretBindingManifest,
+      secretBindingName,
+      secretBindingProviderType,
+      secretBindingSecretRef,
+      createSecretManifest,
+      setSecretManifest,
+      secretManifest,
+      secretName } = useCredentialContext()
+
     return {
+      createSecretBindingManifest,
+      setSecretBindingManifest,
+      secretBindingManifest,
+      secretBindingName,
+      secretBindingProviderType,
+      secretBindingSecretRef,
+      createSecretManifest,
+      setSecretManifest,
+      secretManifest,
+      secretName,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      selectedCloudProfile: undefined,
-      name: undefined,
       errorMessage: undefined,
       detailedErrorMessage: undefined,
-      validationErrors,
       helpVisible: false,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    const rules = {}
+    if (!this.isCreateMode) {
+      return rules
+    }
+
+    const nameRules = {
+      required,
+      maxLength: maxLength(128),
+      lowerCaseAlphaNumHyphen,
+      noStartEndHyphen,
+      unique: unique(this.isDnsProviderSecret ? 'dnsSecretNames' : 'infrastructureSecretNames'),
+    }
+    rules.name = withFieldName('Secret Name', nameRules)
+
+    return rules
   },
   computed: {
-    ...mapState(useAuthzStore, ['namespace']),
-    ...mapState(useSecretStore, [
-      'infrastructureSecretList',
-      'dnsSecretList',
+    ...mapState(useCredentialStore, [
+      'infrastructureSecretBindingsList',
+      'dnsSecretBindingsList',
     ]),
-    ...mapState(useCloudProfileStore, ['sortedInfrastructureKindList']),
-    ...mapState(useGardenerExtensionStore, ['sortedDnsProviderList']),
+    ...mapState(useGardenerExtensionStore, ['dnsProviderTypes']),
     ...mapState(useShootStore, ['shootList']),
-    dnsProviderTypes () {
-      return map(this.sortedDnsProviderList, 'type')
-    },
-    cloudProfileName: {
-      get () {
-        return this.selectedCloudProfile
-      },
-      set (cloudProfileName) {
-        this.selectedCloudProfile = cloudProfileName
-        this.$emit('cloud-profile-name', cloudProfileName)
-      },
-    },
-    cloudProfiles () {
-      return sortBy(this.cloudProfilesByCloudProviderKind(this.vendor), [(item) => item.metadata.name])
-    },
     visible: {
       get () {
         return this.modelValue
@@ -260,29 +252,14 @@ export default {
         this.$emit('update:modelValue', modelValue)
       },
     },
-    valid () {
-      return this.dataValid && !this.v$.$invalid
-    },
-    validators () {
-      const validators = {}
-      if (this.isCreateMode) {
-        validators.name = {
-          required,
-          maxLength: maxLength(128),
-          resourceName,
-          unique: unique(this.isDnsProviderSecret ? 'dnsSecretNames' : 'infrastructureSecretNames'),
-        }
-      }
-      return validators
-    },
     infrastructureSecretNames () {
-      return this.infrastructureSecretList.map(item => item.metadata.name)
+      return this.infrastructureSecretBindingsList.map(item => item.metadata.name)
     },
     dnsSecretNames () {
-      return this.dnsSecretList.map(item => item.metadata.name)
+      return this.dnsSecretBindingsList.map(item => item.metadata.name)
     },
     isCreateMode () {
-      return !this.secret
+      return !this.secretBinding
     },
     submitButtonText () {
       return this.isCreateMode ? 'Add Secret' : 'Replace Secret'
@@ -294,10 +271,10 @@ export default {
       return this.shootsByInfrastructureSecret.length
     },
     shootsByInfrastructureSecret () {
-      const name = get(this.secret, 'metadata.name')
+      const name = get(this.secretBinding, ['metadata', 'name'])
       return filter(this.shootList, ['spec.secretBindingName', name])
     },
-    helpStyle () {
+    helpContainerStyles () {
       const detailsRef = this.$refs.secretDetails
       let detailsHeight = 0
       if (detailsRef) {
@@ -305,25 +282,33 @@ export default {
       }
       return {
         maxHeight: `${detailsHeight}px`,
+        maxWidth: '50%',
       }
     },
     isInfrastructureSecret () {
-      return includes(this.sortedInfrastructureKindList, this.vendor)
+      return includes(this.sortedProviderTypeList, this.providerType)
     },
     isDnsProviderSecret () {
-      return includes(this.dnsProviderTypes, this.vendor)
+      return includes(this.dnsProviderTypes, this.providerType)
+    },
+    name: {
+      get () {
+        return this.secretBindingName
+      },
+      set (value) {
+        this.secretBindingName = value
+        this.secretName = value
+        this.secretBindingSecretRef.name = value
+      },
     },
   },
   mounted () {
     this.reset()
   },
   methods: {
-    ...mapActions(useSecretStore, [
-      'createSecret',
-      'updateSecret',
-    ]),
-    ...mapActions(useCloudProfileStore, [
-      'cloudProfilesByCloudProviderKind',
+    ...mapActions(useCredentialStore, [
+      'createCredential',
+      'updateCredential',
     ]),
     hide () {
       this.visible = false
@@ -332,92 +317,85 @@ export default {
       this.hide()
     },
     async submit () {
-      this.v$.$touch()
-      if (this.valid) {
-        try {
-          await this.save()
-          this.hide()
-        } catch (err) {
-          const errorDetails = errorDetailsFromError(err)
-          if (this.isCreateMode) {
-            if (isConflict(err)) {
-              this.errorMessage = `Infrastructure Secret name '${this.name}' is already taken. Please try a different name.`
-              setInputFocus(this, 'name')
-            } else {
-              this.errorMessage = 'Failed to create Infrastructure Secret.'
-            }
+      if (this.secretValidations.$invalid) {
+        await this.secretValidations.$validate()
+        const message = messageFromErrors(this.secretValidations.$errors)
+        this.errorMessage = 'There are input errors that you need to resolve'
+        this.detailedErrorMessage = message
+        return
+      }
+      try {
+        await this.save()
+        this.hide()
+      } catch (err) {
+        const errorDetails = errorDetailsFromError(err)
+        if (this.isCreateMode) {
+          if (isConflict(err)) {
+            this.errorMessage = `Infrastructure Secret name '${this.name}' is already taken. Please try a different name.`
+            setInputFocus(this, 'name')
           } else {
-            this.errorMessage = 'Failed to update Infrastructure Secret.'
+            this.errorMessage = 'Failed to create Infrastructure Secret.'
           }
-          this.detailedErrorMessage = errorDetails.detailedMessage
-          this.logger.error(this.errorMessage, errorDetails.errorCode, errorDetails.detailedMessage, err)
+        } else {
+          this.errorMessage = 'Failed to update Infrastructure Secret.'
         }
+        this.detailedErrorMessage = errorDetails.detailedMessage
+        this.logger.error(this.errorMessage, errorDetails.errorCode, errorDetails.detailedMessage, err)
       }
     },
     save () {
       if (this.isCreateMode) {
-        const metadata = {
-          name: this.name,
-          namespace: this.namespace,
-          secretRef: {
-            name: this.name,
-            namespace: this.namespace,
-          },
-        }
-
-        if (this.isInfrastructureSecret) {
-          metadata.cloudProviderKind = this.vendor
-          metadata.cloudProfileName = this.cloudProfileName
-        }
-
-        if (this.isDnsProviderSecret) {
-          metadata.dnsProviderName = this.vendor
-        }
-
-        return this.createSecret({ metadata, data: this.data })
+        return this.createCredential({ secret: this.secretManifest, secretBinding: this.secretBindingManifest })
       } else {
-        const metadata = cloneDeep(this.secret.metadata)
-
-        return this.updateSecret({ metadata, data: this.data })
+        return this.updateCredential({ secret: this.secretManifest, secretBinding: this.secretBindingManifest })
       }
     },
     reset () {
       this.v$.$reset()
-      const cloudProfileRef = this.$refs.cloudProfile
-      if (cloudProfileRef) {
-        cloudProfileRef.v$.$reset()
-      }
 
       if (this.isCreateMode) {
-        this.name = `my-${this.vendor}-secret`
-
-        if (this.cloudProfiles.length === 1) {
-          this.cloudProfileName = get(head(this.cloudProfiles), 'metadata.name')
-        } else {
-          this.cloudProfileName = undefined
-        }
+        this.createSecretBindingManifest()
+        this.createSecretManifest()
+        this.name = `my-${this.providerType}-secret`
+        this.secretBindingProviderType = this.providerType
 
         setDelayedInputFocus(this, 'name')
       } else {
-        this.name = get(this.secret, 'metadata.name')
-        this.cloudProfileName = get(this.secret, 'metadata.cloudProfileName')
+        this.setSecretBindingManifest(this.secretBinding)
+        this.setSecretManifest(this.secretBinding._secret)
       }
 
       this.errorMessage = undefined
       this.detailedMessage = undefined
     },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>
 
 <style lang="scss" scoped>
 
-  .help {
-    max-width: 80%;
-    overflow-y: auto;
-  }
+.help-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.help-content {
+  height: 100%;
+  overflow-y: auto;
+  padding-right: 15px;
+  box-sizing: content-box;
+}
+
+.help-container::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 50px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), rgba(var(--v-theme-surface)));
+  pointer-events: none;
+}
 
 </style>

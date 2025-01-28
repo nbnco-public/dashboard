@@ -8,13 +8,11 @@ import SymbolTree from 'symbol-tree'
 
 import { v4 as uuidv4 } from '@/utils/uuid'
 
-import {
-  forEach,
-  isEmpty,
-  keys,
-  compact,
-  values,
-} from '@/lodash'
+import forEach from 'lodash/forEach'
+import isEmpty from 'lodash/isEmpty'
+import keys from 'lodash/keys'
+import compact from 'lodash/compact'
+import values from 'lodash/values'
 
 export const PositionEnum = {
   TOP: 'top',
@@ -120,8 +118,8 @@ export class GSymbolTree extends SymbolTree {
       return
     }
 
-    const targetItem = this.itemMap[targetId]
-    const sourceItem = this.itemMap[sourceId]
+    const targetItem = this.itemMap[targetId] // eslint-disable-line security/detect-object-injection
+    const sourceItem = this.itemMap[sourceId] // eslint-disable-line security/detect-object-injection
     if (!targetItem || !sourceItem) {
       return
     }
@@ -136,7 +134,7 @@ export class GSymbolTree extends SymbolTree {
   }
 
   removeWithId (id, clean = true) {
-    const item = this.itemMap[id]
+    const item = this.itemMap[id] // eslint-disable-line security/detect-object-injection
     if (!item) {
       return
     }
@@ -174,14 +172,14 @@ export class GSymbolTree extends SymbolTree {
   _addToItemMap (newItem) {
     if (newItem instanceof Leaf) {
       const key = newItem.uuid
-      this.itemMap[key] = newItem
+      this.itemMap[key] = newItem // eslint-disable-line security/detect-object-injection
     }
   }
 
   _removeFromItemMap (removeObject) {
     if (removeObject instanceof Leaf) {
       const key = removeObject.uuid
-      delete this.itemMap[key]
+      delete this.itemMap[key] // eslint-disable-line security/detect-object-injection
     }
   }
 

@@ -9,6 +9,8 @@
 import statuses from 'statuses'
 import toIdentifier from 'toidentifier'
 
+import get from 'lodash/get'
+
 function hasStatusCode (err, statusCode) {
   return err.statusCode === statusCode || err.response?.status === statusCode
 }
@@ -30,7 +32,7 @@ export function createError (name, message, properties) {
   if (typeof name === 'number') {
     const statusCode = name
     err.statusCode = statusCode
-    name = toIdentifier(statuses.message[statusCode] ?? 'http')
+    name = toIdentifier(get(statuses, [message, statusCode], 'http'))
   }
   name = toIdentifier(name)
   if (!name.endsWith('Error')) {
@@ -46,6 +48,10 @@ export function createClockSkewError (message = 'System clocks of server and cli
 
 export function createNoUserError (message = 'User not found', ...rest) {
   return createError('NoUser', message, ...rest)
+}
+
+export function createSessionExpiredError (message = 'User session is expired', ...rest) {
+  return createError('SessionExpired', message, ...rest)
 }
 
 export function createAbortError (message, ...rest) {
@@ -72,8 +78,16 @@ export function isGatewayTimeoutError (err) {
   return hasStatusCode(err, 504)
 }
 
+export function isTooManyRequestsError (err) {
+  return hasStatusCode(err, 429)
+}
+
 export function isNoUserError (err) {
   return err.name === 'NoUserError'
+}
+
+export function isSessionExpiredError (err) {
+  return err.name === 'SessionExpired'
 }
 
 export function isClockSkewError (err) {

@@ -28,43 +28,45 @@ SPDX-License-Identifier: Apache-2.0
             </span>
           </template>
         </v-toolbar-title>
+        <v-btn
+          v-if="isToolbarCloseButtonVisible"
+          class="mr-4"
+          variant="text"
+          density="comfortable"
+          icon="mdi-close"
+          color="toolbar-title"
+          @click.stop="hideDialog"
+        />
       </v-toolbar>
-      <div>
-        <slot name="top" />
+      <div v-if="$slots.header">
+        <slot name="header" />
       </div>
       <div
-        ref="cardContent"
+        ref="cardContentRef"
         class="card-content"
       >
-        <slot name="card" />
-        <v-card-text v-if="$slots.message">
-          <slot name="message" />
-        </v-card-text>
+        <slot name="content" />
+      </div>
+      <div v-if="$slots.footer">
+        <slot name="footer" />
       </div>
       <div
-        v-if="$slots.additionalMessage"
+        v-if="message"
         class="mt-2"
       >
-        <slot name="additionalMessage" />
-      </div>
-      <div
-        v-if="$slots.errorMessage || message"
-        class="mt-2"
-      >
-        <slot name="errorMessage">
-          <g-message
-            v-model:message="message"
-            v-model:detailed-message="detailedMessage"
-            color="error"
-          />
-        </slot>
+        <g-message
+          v-model:message="message"
+          v-model:detailed-message="detailedMessage"
+          color="error"
+          tile
+        />
       </div>
 
       <v-divider />
       <v-card-actions>
         <v-spacer />
         <v-text-field
-          v-if="confirmValue && !confirmDisabled"
+          v-if="confirmValue"
           ref="deleteDialogInput"
           v-model="userInput"
           :label="hint"
@@ -86,22 +88,21 @@ SPDX-License-Identifier: Apache-2.0
         </v-btn>
         <v-tooltip
           location="top"
-          :disabled="valid"
+          :disabled="!notConfirmed"
         >
           <template #activator="{ props }">
             <div v-bind="props">
               <v-btn
                 variant="text"
-                :disabled="!valid"
                 class="text-toolbar-background"
+                :disabled="notConfirmed || !valid"
                 @click="resolveAction(true)"
               >
                 {{ confirmButtonText }}
               </v-btn>
             </div>
           </template>
-          <span v-if="confirmDisabled">There are input errors that you need to resolve</span>
-          <span v-else-if="notConfirmed">You need to confirm your changes by typing this cluster's name</span>
+          You need to confirm your changes by typing this cluster's name
         </v-tooltip>
       </v-card-actions>
     </v-card>
@@ -109,15 +110,19 @@ SPDX-License-Identifier: Apache-2.0
 </template>
 
 <script>
+import { ref } from 'vue'
+import { useVuelidate } from '@vuelidate/core'
+
 import GMessage from '@/components/GMessage.vue'
 
-import { setDelayedInputFocus } from '@/utils'
+import { useScrollBar } from '@/composables/useScrollBar'
 
-import {
-  isFunction,
-  noop,
-  trim,
-} from '@/lodash'
+import { setDelayedInputFocus } from '@/utils'
+import { messageFromErrors } from '@/utils/validators'
+
+import trim from 'lodash/trim'
+import noop from 'lodash/noop'
+import isFunction from 'lodash/isFunction'
 
 const zeroWidthSpace = '\u200B'
 
@@ -129,10 +134,6 @@ export default {
     confirmValue: {
       type: String,
     },
-    confirmDisabled: {
-      type: Boolean,
-      default: false,
-    },
     errorMessage: {
       type: String,
     },
@@ -142,6 +143,10 @@ export default {
     confirmButtonText: {
       type: String,
       default: 'Confirm',
+    },
+    isToolbarCloseButtonVisible: {
+      type: Boolean,
+      default: false,
     },
     cancelButtonText: {
       type: String,
@@ -159,12 +164,27 @@ export default {
       type: Boolean,
       default: false,
     },
+    valid: {
+      // use to pass validation result from a parent component
+      // Use only if outside v$ scope
+      type: Boolean,
+      default: true,
+    },
   },
   emits: [
     'update:errorMessage',
     'update:detailedErrorMessage',
     'dialogClosed',
   ],
+  setup () {
+    const cardContentRef = ref(null)
+    useScrollBar(cardContentRef)
+
+    return {
+      v$: useVuelidate(),
+      cardContentRef,
+    }
+  },
   data () {
     return {
       userInput: '',
@@ -203,15 +223,8 @@ export default {
         this.$emit('update:detailedErrorMessage', value)
       },
     },
-    valid () {
-      return !this.confirmDisabled && !this.notConfirmed
-    },
-  },
-  watch: {
-    visible (value) {
-      if (value) {
-        this.showScrollBar(0)
-      }
+    hasVisibleErrors () {
+      return this.v$.$errors.length > 0
     },
   },
   methods: {
@@ -237,8 +250,17 @@ export default {
       this.visible = true
     },
     async resolveAction (value) {
-      if (value && !this.valid) {
-        return
+      if (value) {
+        if (!this.valid || this.notConfirmed) {
+          return
+        }
+        if (this.v$.$invalid) {
+          await this.v$.$validate()
+          const message = messageFromErrors(this.v$.$errors)
+          this.message = 'There are input errors that you need to resolve'
+          this.detailedMessage = message
+          return
+        }
       }
 
       if (isFunction(this.resolve)) {
@@ -257,20 +279,6 @@ export default {
       }
       this.$emit('dialogClosed', value)
       this.visible = false
-    },
-    showScrollBar (retryCount) {
-      if (!this.visible || retryCount > 10) {
-        // circuit breaker
-        return
-      }
-      const cardContentRef = this.$refs.cardContent
-      if (!cardContentRef || !cardContentRef.clientHeight) {
-        this.$nextTick(() => this.showScrollBar(retryCount + 1))
-        return
-      }
-      const scrollTopVal = cardContentRef.scrollTop
-      cardContentRef.scrollTop = scrollTopVal + 10
-      cardContentRef.scrollTop = scrollTopVal - 10
     },
   },
 }

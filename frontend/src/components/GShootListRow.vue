@@ -13,12 +13,10 @@ SPDX-License-Identifier: Apache-2.0
       class="position-relative"
     >
       <template v-if="cell.header.key === 'project'">
-        <router-link
-          class="text-anchor"
+        <g-text-router-link
           :to="{ name: 'ShootList', params: { namespace: shootNamespace } }"
-        >
-          {{ shootProjectName }}
-        </router-link>
+          :text="shootProjectName"
+        />
       </template>
       <template v-if="cell.header.key === 'name'">
         <v-row
@@ -29,12 +27,10 @@ SPDX-License-Identifier: Apache-2.0
           >
             <g-auto-hide right>
               <template #activator>
-                <router-link
-                  class="text-anchor"
+                <g-text-router-link
                   :to="{ name: 'ShootItem', params: { name: shootName, namespace: shootNamespace } }"
-                >
-                  {{ shootName }}
-                </router-link>
+                  :text="shootName"
+                />
               </template>
               <g-copy-btn :clipboard-text="shootName" />
             </g-auto-hide>
@@ -42,15 +38,13 @@ SPDX-License-Identifier: Apache-2.0
           <v-col
             class="flex-grow-0 flex-shrink-1 pa-0 ma-0"
           >
-            <g-shoot-messages
-              :shoot-item="shootItem"
-            />
+            <g-shoot-messages />
           </v-col>
         </v-row>
       </template>
       <template v-if="cell.header.key === 'infrastructure'">
         <g-vendor
-          :cloud-provider-kind="shootCloudProviderKind"
+          :provider-type="shootProviderType"
           :region="shootRegion"
           :zones="shootZones"
         />
@@ -58,7 +52,7 @@ SPDX-License-Identifier: Apache-2.0
       <template v-if="cell.header.key === 'seed'">
         <g-auto-hide right>
           <template #activator>
-            <g-shoot-seed-name :shoot-item="shootItem" />
+            <g-shoot-seed-name />
           </template>
           <g-copy-btn :clipboard-text="shootSeedName" />
         </g-auto-hide>
@@ -72,7 +66,21 @@ SPDX-License-Identifier: Apache-2.0
         </g-auto-hide>
       </template>
       <template v-if="cell.header.key === 'workers'">
-        <g-worker-groups :shoot-item="shootItem" />
+        <div class="d-flex justify-center">
+          <g-collapsible-items
+            :items="shootWorkerGroups"
+            :uid="shootUid"
+            :chip-color="hasShootWorkerGroupWarning ? 'warning' : 'primary'"
+            inject-key="expandedWorkerGroups"
+          >
+            <template #item="{ item }">
+              <g-worker-group
+                :worker-group="item"
+                class="ma-1"
+              />
+            </template>
+          </g-collapsible-items>
+        </div>
       </template>
       <template v-if="cell.header.key === 'createdBy'">
         <g-account-avatar :account-name="shootCreatedBy" />
@@ -92,47 +100,50 @@ SPDX-License-Identifier: Apache-2.0
         <div class="d-flex align-center justify-center">
           <g-shoot-status
             :popper-key="`${shootNamespace}/${shootName}`"
-            :shoot-item="shootItem"
           />
         </div>
       </template>
       <template v-if="cell.header.key === 'k8sVersion'">
         <div class="d-flex justify-center">
-          <g-shoot-version
-            :shoot-item="shootItem"
-            chip
-          />
+          <g-shoot-version-chip />
         </div>
       </template>
       <template v-if="cell.header.key === 'readiness'">
         <div class="d-flex">
-          <g-status-tags :shoot-item="shootItem" />
+          <g-status-tags />
         </div>
       </template>
       <template v-if="cell.header.key === 'controlPlaneHighAvailability'">
         <div class="d-flex justify-center">
           <g-control-plane-high-availability-tag
-            :shoot-item="shootItem"
+
             size="small"
           />
         </div>
       </template>
       <template v-if="cell.header.key === 'issueSince'">
-        <v-tooltip location="top">
-          <template #activator="{ props }">
-            <div v-bind="props">
-              <g-time-string
-                :date-time="shootIssueSinceTimestamp"
-                mode="past"
-                without-prefix-or-suffix
-              />
-            </div>
-          </template>
-          {{ shootIssueSince }}
-        </v-tooltip>
+        <g-time-string
+          :date-time="shootIssueSinceTimestamp"
+          mode="past"
+          without-prefix-or-suffix
+        />
       </template>
       <template v-if="cell.header.key === 'accessRestrictions'">
-        <g-access-restriction-chips :selected-access-restrictions="shootSelectedAccessRestrictions" />
+        <g-collapsible-items
+          :items="shootAccessRestrictions"
+          :uid="shootUid"
+          inject-key="expandedAccessRestrictions"
+        >
+          <template #item="{ item }">
+            <g-access-restriction-chip
+              :id="item.key"
+              :key="item.key"
+              :title="item.title"
+              :description="item.description"
+              :options="item.options"
+            />
+          </template>
+        </g-collapsible-items>
       </template>
       <template v-if="cell.header.key === 'ticket'">
         <g-external-link
@@ -151,33 +162,33 @@ SPDX-License-Identifier: Apache-2.0
         </template>
         <div
           v-else
-          class="labels"
+          class="d-flex flex-wrap ticket-labels"
         >
           <g-ticket-label
             v-for="label in shootTicketLabels"
-            :key="label.id"
+            :key="label.name"
             :label="label"
           />
         </div>
       </template>
       <template v-if="cell.header.customField">
-        <template v-if="cell.value">
-          <v-tooltip
-            v-if="cell.header.tooltip"
-            location="top"
-          >
-            <template #activator="{ props }">
-              <span v-bind="props">{{ cell.value }}</span>
-            </template>
-            {{ cell.header.tooltip }}
-          </v-tooltip>
-          <span v-else>{{ cell.value }}</span>
-        </template>
-        <span
-          v-else-if="cell.header.defaultValue"
-          class="text-grey"
+        <v-tooltip
+          v-if="cell.header.tooltip"
+          location="top"
         >
-          {{ cell.header.defaultValue }}
+          <template #activator="slotProps">
+            <span
+              v-bind="slotProps.props"
+              :class="{'text-disabled' : !cell.value}"
+            >{{ cell.displayValue }}</span>
+          </template>
+          {{ cell.header.tooltip }}
+        </v-tooltip>
+        <span
+          v-else-if="cell.displayValue"
+          :class="{'text-disabled' : !cell.value}"
+        >
+          {{ cell.displayValue }}
         </span>
       </template>
       <template v-if="cell.header.key === 'actions'">
@@ -191,11 +202,13 @@ SPDX-License-Identifier: Apache-2.0
             icon="mdi-key"
             :disabled="isClusterAccessDialogDisabled"
             :tooltip="showClusterAccessActionTitle"
-            @click="showDialog('access')"
+            @click="setShootAction('access', shootItem)"
           />
-          <g-shoot-list-row-actions
+          <g-action-button
             v-if="canPatchShoots"
-            :shoot-item="shootItem"
+            icon="mdi-dots-vertical"
+            tooltip="Cluster Actions"
+            @click="setShootAction('menu', shootItem, $event.target)"
           />
         </v-row>
       </template>
@@ -203,10 +216,10 @@ SPDX-License-Identifier: Apache-2.0
         v-if="isStaleShoot"
         location="top"
       >
-        <template #activator="{ props }">
+        <template #activator="slotProps">
           <div
             class="stale-overlay"
-            v-bind="props"
+            v-bind="slotProps.props"
           />
         </template>
         This cluster is no longer part of the list and kept as stale item
@@ -215,16 +228,24 @@ SPDX-License-Identifier: Apache-2.0
   </tr>
 </template>
 
-<script>
+<script setup>
 import {
-  mapState,
-  mapActions,
-} from 'pinia'
+  computed,
+  toRef,
+} from 'vue'
+import { storeToRefs } from 'pinia'
 
 import { useAuthzStore } from '@/store/authz'
 import { useTicketStore } from '@/store/ticket'
+import { useShootStore } from '@/store/shoot'
+import { useConfigStore } from '@/store/config'
+import { useCredentialStore } from '@/store/credential'
+import { useCloudProfileStore } from '@/store/cloudProfile'
+import { useProjectStore } from '@/store/project'
+import { useSeedStore } from '@/store/seed'
+import { useGardenerExtensionStore } from '@/store/gardenerExtension'
 
-import GAccessRestrictionChips from '@/components/ShootAccessRestrictions/GAccessRestrictionChips.vue'
+import GAccessRestrictionChip from '@/components/ShootAccessRestrictions/GAccessRestrictionChip.vue'
 import GAccountAvatar from '@/components/GAccountAvatar.vue'
 import GActionButton from '@/components/GActionButton.vue'
 import GCopyBtn from '@/components/GCopyBtn.vue'
@@ -233,163 +254,193 @@ import GShootStatus from '@/components/GShootStatus.vue'
 import GStatusTags from '@/components/GStatusTags.vue'
 import GPurposeTag from '@/components/GPurposeTag.vue'
 import GTimeString from '@/components/GTimeString.vue'
-import GShootVersion from '@/components/ShootVersion/GShootVersion.vue'
+import GShootVersionChip from '@/components/ShootVersion/GShootVersionChip.vue'
 import GTicketLabel from '@/components/ShootTickets/GTicketLabel.vue'
 import GShootSeedName from '@/components/GShootSeedName.vue'
 import GShootMessages from '@/components/ShootMessages/GShootMessages.vue'
-import GShootListRowActions from '@/components/GShootListRowActions.vue'
 import GAutoHide from '@/components/GAutoHide.vue'
 import GExternalLink from '@/components/GExternalLink.vue'
 import GControlPlaneHighAvailabilityTag from '@/components/ControlPlaneHighAvailability/GControlPlaneHighAvailabilityTag.vue'
-import GWorkerGroups from '@/components/ShootWorkers/GWorkerGroups'
+import GWorkerGroup from '@/components/ShootWorkers/GWorkerGroup'
+import GTextRouterLink from '@/components/GTextRouterLink.vue'
+import GCollapsibleItems from '@/components/GCollapsibleItems'
 
-import {
-  isTypeDelete,
-  getTimestampFormatted,
-  getIssueSince,
-} from '@/utils'
-import { shootItem } from '@/mixins/shootItem'
+import { useShootAction } from '@/composables/useShootAction'
+import { useProvideShootItem } from '@/composables/useShootItem'
+import { useProvideShootHelper } from '@/composables/useShootHelper'
+import { formatValue } from '@/composables/useProjectShootCustomFields/helper'
 
-import {
-  includes,
-  get,
-  map,
-  isObject,
-} from '@/lodash'
+import { getIssueSince } from '@/utils'
 
-export default {
-  components: {
-    GAccessRestrictionChips,
-    GActionButton,
-    GStatusTags,
-    GPurposeTag,
-    GShootStatus,
-    GTimeString,
-    GShootVersion,
-    GTicketLabel,
-    GAccountAvatar,
-    GCopyBtn,
-    GShootSeedName,
-    GVendor,
-    GShootMessages,
-    GShootListRowActions,
-    GAutoHide,
-    GExternalLink,
-    GControlPlaneHighAvailabilityTag,
-    GWorkerGroups,
+import find from 'lodash/find'
+import some from 'lodash/some'
+import map from 'lodash/map'
+import get from 'lodash/get'
+import includes from 'lodash/includes'
+
+const props = defineProps({
+  modelValue: {
+    type: Object,
+    required: true,
   },
-  mixins: [shootItem],
-  props: {
-    visibleHeaders: {
-      type: Array,
-      required: true,
-    },
+  visibleHeaders: {
+    type: Array,
+    required: true,
   },
-  emits: [
-    'showDialog',
-  ],
-  computed: {
-    ...mapState(useAuthzStore, [
-      'canGetSecrets',
-      'canPatchShoots',
-      'canDeleteShoots',
-    ]),
+})
+const shootItem = toRef(props, 'modelValue')
 
-    isInfoAvailable () {
-      // operator not yet updated shoot resource
-      if (this.shootLastOperation.type === undefined || this.shootLastOperation.state === undefined) {
-        return false
-      }
-      return !this.isCreateOrDeleteInProcess
-    },
-    isCreateOrDeleteInProcess () {
-      // create or delete in process
-      if (includes(['Create', 'Delete'], this.shootLastOperation.type) && this.shootLastOperation.state === 'Processing') {
-        return true
-      }
-      return false
-    },
-    isTypeDelete () {
-      return isTypeDelete(this.shootLastOperation)
-    },
-    isClusterAccessDialogDisabled () {
-      if (this.shootInfo.dashboardUrl) {
-        return false
-      }
-      if (this.shootInfo.kubeconfig) {
-        return false
-      }
+const { setShootAction } = useShootAction()
 
-      // disabled if info is NOT available
-      return !this.isInfoAvailable
-    },
-    showClusterAccessActionTitle () {
-      return this.isClusterAccessDialogDisabled
-        ? 'Cluster Access'
-        : 'Show Cluster Access'
-    },
-    shootLastUpdatedTicket () {
-      return this.latestUpdatedTicket({
-        projectName: this.shootProjectName,
-        name: this.shootName,
-      })
-    },
-    shootLastUpdatedTicketUrl () {
-      return get(this.shootLastUpdatedTicket, 'data.html_url')
-    },
-    shootLastUpdatedTicketTimestamp () {
-      return get(this.shootLastUpdatedTicket, 'metadata.updated_at')
-    },
-    shootTicketLabels () {
-      return this.ticketLabels({
-        projectName: this.shootProjectName,
-        name: this.shootName,
-      })
-    },
-    shootIssueSinceTimestamp () {
-      return getIssueSince(this.shootItem.status)
-    },
-    shootIssueSince () {
-      return getTimestampFormatted(this.shootIssueSinceTimestamp)
-    },
-    cells () {
-      return map(this.visibleHeaders, header => {
-        let value = get(this.shootItem, header.path)
-        if (isObject(value)) { // only allow primitive types
-          value = undefined
-        }
+const shootStore = useShootStore()
+const ticketStore = useTicketStore()
+const authzStore = useAuthzStore()
+const configStore = useConfigStore()
+const credentialStore = useCredentialStore()
+const cloudProfileStore = useCloudProfileStore()
+const projectStore = useProjectStore()
+const seedStore = useSeedStore()
+const gardenerExtensionStore = useGardenerExtensionStore()
 
-        let className = header.class
-        if (this.isStaleShoot && !header.stalePointerEvents) {
-          className = `${header.class} no-stale-pointer-events`
-        }
+const {
+  canGetSecrets,
+  canPatchShoots,
+} = storeToRefs(authzStore)
 
-        return {
-          header: {
-            ...header,
-            class: className,
-          },
-          value, // currently only applicable for header.customField === true
-        }
-      })
-    },
-  },
-  methods: {
-    ...mapActions(useTicketStore, {
-      latestUpdatedTicket: 'latestUpdated',
-      ticketLabels: 'labels',
-    }),
-    showDialog (action) {
-      const shootItem = this.shootItem
-      this.$emit('showDialog', { action, shootItem })
-    },
-  },
-}
+const {
+  shootMetadata,
+  shootName,
+  shootNamespace,
+  shootCreatedBy,
+  shootCreationTimestamp,
+  shootProjectName,
+  shootPurpose,
+  shootProviderType,
+  shootRegion,
+  shootZones,
+  shootInfo,
+  shootLastOperation,
+  shootTechnicalId,
+  shootSeedName,
+  shootAccessRestrictions,
+  shootWorkerGroups,
+  shootUid,
+  shootCloudProfileName,
+} = useProvideShootItem(shootItem, {
+  cloudProfileStore,
+  projectStore,
+  seedStore,
+})
+
+useProvideShootHelper(shootItem, {
+  cloudProfileStore,
+  configStore,
+  gardenerExtensionStore,
+  credentialStore,
+  seedStore,
+})
+
+const isInfoAvailable = computed(() => {
+  // operator not yet updated shoot resource
+  if (shootLastOperation.value.type === undefined || shootLastOperation.value.state === undefined) {
+    return false
+  }
+  return !isCreateOrDeleteInProcess.value
+})
+
+const isCreateOrDeleteInProcess = computed(() => {
+  // create or delete in process
+  if (includes(['Create', 'Delete'], shootLastOperation.value.type) && shootLastOperation.value.state === 'Processing') {
+    return true
+  }
+  return false
+})
+
+const isClusterAccessDialogDisabled = computed(() => {
+  if (shootInfo.value.dashboardUrl) {
+    return false
+  }
+  if (shootInfo.value.kubeconfigGardenlogin) {
+    return false
+  }
+
+  // disabled if info is NOT available
+  return !isInfoAvailable.value
+})
+
+const isStaleShoot = computed(() => {
+  return !shootStore.isShootActive(shootMetadata.value.uid)
+})
+
+const showClusterAccessActionTitle = computed(() => {
+  return isClusterAccessDialogDisabled.value
+    ? 'Cluster Access'
+    : 'Show Cluster Access'
+})
+
+const shootLastUpdatedTicket = computed(() => {
+  return ticketStore.latestUpdated({
+    projectName: shootProjectName.value,
+    name: shootName.value,
+  })
+})
+
+const shootLastUpdatedTicketUrl = computed(() => {
+  return get(shootLastUpdatedTicket.value, ['data', 'html_url'])
+})
+
+const shootLastUpdatedTicketTimestamp = computed(() => {
+  return get(shootLastUpdatedTicket.value, ['metadata', 'updated_at'])
+})
+
+const shootTicketLabels = computed(() => {
+  return ticketStore.labels({
+    projectName: shootProjectName.value,
+    name: shootName.value,
+  })
+})
+
+const shootIssueSinceTimestamp = computed(() => {
+  return getIssueSince(shootItem.value.status)
+})
+
+const cells = computed(() => {
+  return map(props.visibleHeaders, header => {
+    const value = get(shootItem.value, header.path)
+    const displayValue = formatValue(value, ', ') || header.defaultValue
+
+    let className = header.class
+    if (isStaleShoot.value && !header.stalePointerEvents) {
+      className = `${header.class} no-stale-pointer-events`
+    }
+
+    return {
+      header: {
+        ...header,
+        class: className,
+      },
+      value, // currently only applicable for header.customField === true
+      displayValue, // currently only applicable for header.customField === true
+    }
+  })
+})
+
+const hasShootWorkerGroupWarning = computed(() => {
+  const machineImages = cloudProfileStore.machineImagesByCloudProfileName(shootCloudProfileName.value)
+  return some(shootWorkerGroups.value, workerGroup => {
+    const { name, version } = get(workerGroup, ['machine', 'image'], {})
+    const machineImage = find(machineImages, { name, version })
+    return machineImage?.isDeprecated
+  })
+})
+
 </script>
 
 <style lang="scss" scoped>
-  .labels {
-    line-height: 10px;
+  .ticket-labels {
+    overflow-y: scroll;
+    max-height: 30px;
+    max-width: 300px;
   }
 
   .position-relative {

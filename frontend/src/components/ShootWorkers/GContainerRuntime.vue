@@ -12,21 +12,14 @@ SPDX-License-Identifier: Apache-2.0
       color="primary"
       item-color="primary"
       :items="criItems"
-      :error-messages="getErrorMessages('criName')"
+      :error-messages="getErrorMessages(v$.criName)"
       label="Container Runtime"
       :hint="hint"
       persistent-hint
       variant="underlined"
       @update:model-value="onInputCriName"
       @blur="v$.criName.$touch()"
-    >
-      <template #item="{ props, item }">
-        <v-list-item
-          v-bind="props"
-          :disabled="item.raw.disabled"
-        />
-      </template>
-    </v-select>
+    />
     <v-select
       v-if="criContainerRuntimeTypes.length"
       v-model="selectedCriContainerRuntimeTypes"
@@ -47,23 +40,16 @@ SPDX-License-Identifier: Apache-2.0
 import { required } from '@vuelidate/validators'
 import { useVuelidate } from '@vuelidate/core'
 
-import { getValidationErrors } from '@/utils'
+import { getErrorMessages } from '@/utils'
+import { withFieldName } from '@/utils/validators'
 
-import {
-  find,
-  map,
-  get,
-  set,
-  unset,
-  includes,
-  isEmpty,
-} from '@/lodash'
-
-const validationErrors = {
-  criName: {
-    required: 'An explicit container runtime configuration is required',
-  },
-}
+import find from 'lodash/find'
+import map from 'lodash/map'
+import get from 'lodash/get'
+import set from 'lodash/set'
+import unset from 'lodash/unset'
+import includes from 'lodash/includes'
+import isEmpty from 'lodash/isEmpty'
 
 export default {
   props: {
@@ -79,28 +65,23 @@ export default {
       type: String,
       required: true,
     },
+    fieldName: {
+      type: String,
+    },
   },
   setup () {
     return {
       v$: useVuelidate(),
     }
   },
-  data () {
+  validations () {
     return {
-      validationErrors,
+      criName: withFieldName(() => this.fieldName, {
+        required,
+      }),
     }
   },
-  validations () {
-    return this.validators
-  },
   computed: {
-    validators () {
-      return {
-        criName: {
-          required,
-        },
-      }
-    },
     validCriNames () {
       return map(this.machineImageCri, 'name')
     },
@@ -115,22 +96,24 @@ export default {
         criItems.push({
           value: this.criName,
           title: this.criName,
-          disabled: true,
+          props: {
+            disabled: true,
+          },
         })
       }
       return criItems
     },
     criContainerRuntimeTypes () {
       const containerRuntime = find(this.machineImageCri, ['name', this.criName])
-      const ociRuntimes = get(containerRuntime, 'containerRuntimes', [])
+      const ociRuntimes = get(containerRuntime, ['containerRuntimes'], [])
       return map(ociRuntimes, 'type')
     },
     criName: {
       get () {
-        return get(this.worker, 'cri.name')
+        return get(this.worker, ['cri', 'name'])
       },
       set (value) {
-        set(this.worker, 'cri', {
+        set(this.worker, ['cri'], {
           ...this.worker.cri,
           name: value,
         })
@@ -138,7 +121,7 @@ export default {
     },
     selectedCriContainerRuntimeTypes: {
       get () {
-        const criContainerRuntimes = get(this.worker, 'cri.containerRuntimes')
+        const criContainerRuntimes = get(this.worker, ['cri', 'containerRuntimes'])
         return criContainerRuntimes
           ? map(criContainerRuntimes, 'type')
           : undefined
@@ -146,9 +129,9 @@ export default {
       set (value) {
         if (!isEmpty(value)) {
           const criContainerRuntimes = map(value, type => ({ type }))
-          set(this.worker, 'cri.containerRuntimes', criContainerRuntimes)
+          set(this.worker, ['cri', 'containerRuntimes'], criContainerRuntimes)
         } else {
-          unset(this.worker, 'cri.containerRuntimes')
+          unset(this.worker, ['cri', 'containerRuntimes'])
         }
       },
     },
@@ -172,13 +155,11 @@ export default {
     this.v$.$touch()
   },
   methods: {
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
     onInputCriName (value) {
       this.selectedCriContainerRuntimeTypes = undefined
       this.v$.criName.$touch()
     },
+    getErrorMessages,
   },
 }
 </script>

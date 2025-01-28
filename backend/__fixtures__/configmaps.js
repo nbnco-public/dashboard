@@ -6,7 +6,7 @@
 
 'use strict'
 
-const { cloneDeep, find, filter, split, isEmpty } = require('lodash')
+const { cloneDeep, endsWith, find, filter, split, isEmpty } = require('lodash')
 const createError = require('http-errors')
 const pathToRegexp = require('path-to-regexp')
 const { createUrl } = require('./helper')
@@ -14,7 +14,7 @@ const { createUrl } = require('./helper')
 function getConfigMap ({ namespace, name, labels, creationTimestamp, data = {} }) {
   const metadata = {
     namespace,
-    name
+    name,
   }
   if (!isEmpty(labels)) {
     metadata.labels = labels
@@ -32,13 +32,13 @@ function getClusterIdentitConfigMap ({ identity = 'landscape-test' } = {}) {
     namespace: 'kube-system',
     name: 'cluster-identity',
     data: {
-      'cluster-identity': identity
-    }
+      'cluster-identity': identity,
+    },
   })
 }
 
 const configMapsList = [
-  getClusterIdentitConfigMap()
+  getClusterIdentitConfigMap(),
 ]
 
 const configMaps = {
@@ -54,7 +54,19 @@ const configMaps = {
   },
   createClusterIdentityConfigMap (identity) {
     return getClusterIdentitConfigMap({ identity })
-  }
+  },
+  getCaClusterConfigMap (namespace, name) {
+    return getConfigMap({
+      name,
+      namespace,
+      labels: {
+        'gardener.cloud/role': 'ca-cluster',
+      },
+      data: {
+        'ca.crt': 'ca.crt',
+      },
+    })
+  },
 }
 
 const matchOptions = { decode: decodeURIComponent }
@@ -92,6 +104,10 @@ const mocks = {
         const item = configMaps.createClusterIdentityConfigMap(hostname)
         return Promise.resolve(item)
       }
+      if (endsWith(name, '.ca-cluster')) {
+        const item = configMaps.getCaClusterConfigMap(namespace, name)
+        return Promise.resolve(item)
+      }
 
       const item = configMaps.get(namespace, name)
       if (item) {
@@ -100,10 +116,10 @@ const mocks = {
 
       return Promise.reject(createError(404))
     }
-  }
+  },
 }
 
 module.exports = {
   ...configMaps,
-  mocks
+  mocks,
 }

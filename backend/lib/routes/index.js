@@ -17,14 +17,14 @@ module.exports = {
   '/cloudprofiles': require('./cloudprofiles'),
   '/seeds': require('./seeds'),
   '/gardenerextensions': require('./gardenerExtensions'),
-  '/namespaces': require('./namespaces'),
+  '/projects': require('./projects'),
   '/namespaces/:namespace/shoots': require('./shoots'),
   '/namespaces/:namespace/tickets': require('./tickets'),
-  '/namespaces/:namespace/cloudprovidersecrets': require('./cloudProviderSecrets'),
+  '/cloudprovidercredentials': require('./cloudProviderCredentials'),
   '/namespaces/:namespace/members': require('./members'),
-  '/namespaces/:namespace/resourcequotas': require('./resourceQuotas')
+  '/namespaces/:namespace/resourcequotas': require('./resourceQuotas'),
 }
 
-if (_.get(config, 'frontend.features.terminalEnabled', false)) {
+if (_.get(config, ['frontend', 'features', 'terminalEnabled'], false)) {
   module.exports['/terminals'] = require('./terminals')
 }

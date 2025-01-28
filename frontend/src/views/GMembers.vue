@@ -102,8 +102,8 @@ SPDX-License-Identifier: Apache-2.0
       >
         <template #item="{ item }">
           <g-user-row
-            :key="item.raw.username"
-            :item="item.raw"
+            :key="item.username"
+            :item="item"
             :headers="userAccountTableHeaders"
             @delete="onRemoveUser"
             @edit="onEditUser"
@@ -199,8 +199,8 @@ SPDX-License-Identifier: Apache-2.0
       >
         <template #item="{ item }">
           <g-service-account-row
-            :key="`${item.raw.namespace}_${item.raw.username}`"
-            :item="item.raw"
+            :key="`${item.namespace}_${item.username}`"
+            :item="item"
             :headers="serviceAccountTableHeaders"
             @download="onDownload"
             @kubeconfig="onKubeconfig"
@@ -317,6 +317,7 @@ import GActionButton from '@/components/GActionButton.vue'
 import GDataTableFooter from '@/components/GDataTableFooter.vue'
 
 import { useApi } from '@/composables/useApi'
+import { useProvideProjectItem } from '@/composables/useProjectItem'
 
 import {
   displayName,
@@ -325,24 +326,21 @@ import {
   parseServiceAccountUsername,
   isForeignServiceAccount,
   isServiceAccountUsername,
-  getProjectDetails,
   sortedRoleDisplayNames,
   mapTableHeader,
 } from '@/utils'
 
-import {
-  filter,
-  forEach,
-  get,
-  head,
-  includes,
-  join,
-  map,
-  mapKeys,
-  mapValues,
-  orderBy,
-  toLower,
-} from '@/lodash'
+import toLower from 'lodash/toLower'
+import orderBy from 'lodash/orderBy'
+import mapValues from 'lodash/mapValues'
+import mapKeys from 'lodash/mapKeys'
+import map from 'lodash/map'
+import join from 'lodash/join'
+import includes from 'lodash/includes'
+import head from 'lodash/head'
+import get from 'lodash/get'
+import forEach from 'lodash/forEach'
+import filter from 'lodash/filter'
 
 const renderComponent = inject('renderComponent')
 
@@ -375,7 +373,7 @@ const serviceAccountPage = ref(1)
 
 const {
   project,
-  projectList,
+  projectsNotMarkedForDeletion,
 } = storeToRefs(projectStore)
 const {
   namespace,
@@ -397,15 +395,12 @@ const {
   serviceAccountSortBy,
 } = storeToRefs(localStorageStore)
 
+const {
+  projectName,
+  projectOwner: owner,
+} = useProvideProjectItem(project)
+
 const confirmDialog = ref(null)
-
-const projectDetails = computed(() => {
-  return getProjectDetails(project.value)
-})
-
-const owner = computed(() => {
-  return projectDetails.value.owner
-})
 
 const itemsPerPageOptions = markRaw([
   { value: 5, title: '5' },
@@ -499,7 +494,7 @@ const serviceAccountList = computed(() => {
 })
 
 const currentServiceAccountDisplayName = computed(() => {
-  return get(parseServiceAccountUsername(currentServiceAccountName.value), 'name')
+  return get(parseServiceAccountUsername(currentServiceAccountName.value), ['name'])
 })
 
 const serviceAccountTableHeaders = computed(() => {
@@ -641,9 +636,10 @@ async function onRemoveUser ({ username }) {
   }
   await memberStore.deleteMember(username)
   if (isCurrentUser(username) && !isAdmin.value) {
-    if (projectList.value.length > 0) {
-      const p1 = projectList.value[0]
-      await router.push({ name: 'ShootList', params: { namespace: p1.metadata.namespace } })
+    if (projectsNotMarkedForDeletion.value.length > 0) {
+      const project = projectsNotMarkedForDeletion.value[0]
+      const namespace = project.spec.namespace
+      await router.push({ name: 'ShootList', params: { namespace } })
     } else {
       await router.push({ name: 'Home', params: {} })
     }
@@ -651,15 +647,14 @@ async function onRemoveUser ({ username }) {
 }
 
 function confirmRemoveUser (name) {
-  const { projectName } = projectDetails.value
   let message
   if (isCurrentUser(name)) {
     message = renderComponent(GRemoveProjectMember, {
-      projectName,
+      projectName: projectName.value,
     })
   } else {
     message = renderComponent(GRemoveProjectMember, {
-      projectName,
+      projectName: projectName.value,
       memberName: displayName(name),
     })
   }
@@ -690,10 +685,9 @@ async function onResetServiceAccount ({ username }) {
 }
 
 function confirmRemoveForeignServiceAccount (serviceAccountName) {
-  const { projectName } = projectDetails.value
   const { namespace, name } = parseServiceAccountUsername(serviceAccountName)
   const message = renderComponent(GRemoveProjectMember, {
-    projectName,
+    projectName: projectName.value,
     memberName: name,
     namespace,
   })

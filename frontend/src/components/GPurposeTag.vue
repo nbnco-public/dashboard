@@ -10,7 +10,7 @@ SPDX-License-Identifier: Apache-2.0
       <v-chip
         v-if="!!shortPurpose"
         v-bind="props"
-        :variant="!isCritical ? 'outlined' : 'flat'"
+        :variant="!isCritical ? 'tonal' : 'flat'"
         :text-color="textColor"
         color="primary"
         size="small"
@@ -24,7 +24,7 @@ SPDX-License-Identifier: Apache-2.0
 </template>
 
 <script>
-import { toUpper } from '@/lodash'
+import toUpper from 'lodash/toUpper'
 
 export default {
   props: {

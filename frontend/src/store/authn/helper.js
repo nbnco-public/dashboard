@@ -4,10 +4,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-import { unref } from 'vue'
-import { useBrowserLocation } from '@vueuse/core'
-import { useCookies } from '@vueuse/integrations/useCookies'
-import decode from 'jwt-decode'
+import { useEventListener } from '@vueuse/core'
+import { jwtDecode } from 'jwt-decode'
 
 import { useLogger } from '@/composables/useLogger'
 
@@ -18,9 +16,11 @@ import {
   isUnauthorizedError,
   isNoUserError,
   isClockSkewError,
+  createSessionExpiredError,
+  isSessionExpiredError,
 } from '@/utils/errors'
 
-export const COOKIE_HEADER_PAYLOAD = 'gHdrPyl'
+export const COOKIE_HEADER_PAYLOAD = '__Host-gHdrPyl'
 const CLOCK_TOLERANCE = 15
 
 function now () {
@@ -56,22 +56,25 @@ function isExpired (user) {
   return typeof t === 'number' && t < CLOCK_TOLERANCE
 }
 
-export function useUserManager (options) {
+export function useUserManager (cookies, options) {
   const {
-    cookies = useCookies([COOKIE_HEADER_PAYLOAD]),
-    location = useBrowserLocation(),
     logger = useLogger(),
   } = options ?? {}
 
   let refreshTokenPromise
+  let signoutInProgress = false
 
-  const origin = unref(location).origin
+  useEventListener(window, 'beforeunload', () => {
+    signoutInProgress = true
+  })
+
+  const origin = window.location.origin
 
   function decodeCookie () {
     try {
       const value = cookies.get(COOKIE_HEADER_PAYLOAD)
       if (value) {
-        return decode(value)
+        return jwtDecode(value)
       }
     } catch (err) {
       logger.error(err.message)
@@ -101,6 +104,9 @@ export function useUserManager (options) {
       const user = decodeCookie()
       if (!user) {
         throw createNoUserError()
+      }
+      if (isExpired(user)) {
+        throw createSessionExpiredError()
       }
       if (isRefreshRequired(user)) {
         throw createClockSkewError()
@@ -137,12 +143,20 @@ export function useUserManager (options) {
   }
 
   function redirect (url) {
-    unref(location).href = url
+    window.location.href = url
   }
 
-  function signout (err) {
+  function signout (err, redirectPath) {
+    if (signoutInProgress) {
+      return
+    }
+    signoutInProgress = true
     deleteCookie()
     const url = new URL('/auth/logout', origin)
+    redirectPath ??= window.location.pathname + window.location.search
+    if (redirectPath) {
+      url.searchParams.set('redirectPath', redirectPath)
+    }
     if (err) {
       url.searchParams.set('error[name]', err.name)
       url.searchParams.set('error[message]', err.message)
@@ -150,8 +164,12 @@ export function useUserManager (options) {
     redirect(url)
   }
 
-  function signin () {
+  function signin (redirectPath) {
     const url = new URL('/login', origin)
+    redirectPath ??= window.location.pathname + window.location.search
+    if (redirectPath) {
+      url.searchParams.set('redirectPath', redirectPath)
+    }
     redirect(url)
   }
 
@@ -168,6 +186,9 @@ export function useUserManager (options) {
       if (!user) {
         throw createNoUserError()
       }
+      if (isExpired(user)) {
+        throw createSessionExpiredError()
+      }
       if (!isRefreshRequired(user)) {
         return
       }
@@ -176,6 +197,9 @@ export function useUserManager (options) {
         user = decodeCookie()
         if (!user) {
           throw createNoUserError()
+        }
+        if (isExpired(user)) {
+          throw createSessionExpiredError()
         }
         if (!isRefreshRequired(user)) {
           return
@@ -190,7 +214,7 @@ export function useUserManager (options) {
       let frameRequestCallback
       if (isNoUserError(err)) {
         frameRequestCallback = () => signin()
-      } else if (isUnauthorizedError(err) || isClockSkewError(err)) {
+      } else if (isSessionExpiredError(err) || isUnauthorizedError(err) || isClockSkewError(err)) {
         frameRequestCallback = () => signout(err)
       }
       if (typeof frameRequestCallback === 'function') {

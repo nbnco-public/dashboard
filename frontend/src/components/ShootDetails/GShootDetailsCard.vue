@@ -29,16 +29,17 @@ SPDX-License-Identifier: Apache-2.0
               mdi-clock-outline
             </v-icon>
           </template>
-          <g-list-item-content label="Cluster Termination">
-            <div class="d-flex align-center">
-              <g-shoot-messages
-                :shoot-item="shootItem"
-                filter="cluster-expiration"
-                small
-                class="mr-1"
-              />
-              <span>{{ selfTerminationMessage }}</span>
-            </div>
+          <g-list-item-content>
+            <template #label>
+              <div class="d-flex align-center">
+                Cluster Termination
+                <g-shoot-messages
+                  filter="cluster-expiration"
+                  small
+                />
+              </div>
+            </template>
+            {{ selfTerminationMessage }}
           </g-list-item-content>
         </g-list-item>
       </template>
@@ -49,16 +50,21 @@ SPDX-License-Identifier: Apache-2.0
             mdi-cube-outline
           </v-icon>
         </template>
-        <g-list-item-content label="Kubernetes Version">
-          {{ shootK8sVersion }}
+        <g-list-item-content>
+          <template #label>
+            <div class="d-flex align-center">
+              Kubernetes Version
+              <g-shoot-messages
+                v-if="!isShootMarkedForDeletion"
+                filter="k8s"
+                small
+              />
+            </div>
+          </template>
+          <g-shoot-version-chip />
         </g-list-item-content>
         <template #append>
-          <g-shoot-messages
-            v-if="!isShootMarkedForDeletion"
-            :shoot-item="shootItem"
-            filter="k8s"
-          />
-          <g-shoot-version :shoot-item="shootItem" />
+          <g-shoot-version-configuration />
         </template>
       </g-list-item>
       <v-divider inset />
@@ -68,23 +74,34 @@ SPDX-License-Identifier: Apache-2.0
             mdi-server
           </v-icon>
         </template>
-        <g-list-item-content label="Worker Groups">
-          <g-worker-groups
-            :shoot-item="shootItem"
-            class="flex-wrap"
-          />
+        <g-list-item-content>
+          <template #label>
+            <div class="d-flex align-center">
+              Worker Groups
+              <g-shoot-messages
+                v-if="!isShootMarkedForDeletion"
+                filter="machine-image"
+                small
+              />
+            </div>
+          </template>
+          <div
+            v-if="hasShootWorkerGroups"
+            class="d-flex align-center flex-wrap"
+          >
+            <g-worker-group
+              v-for="workerGroup in shootWorkerGroups"
+              :key="workerGroup.name"
+              :worker-group="workerGroup"
+              class="ma-1"
+            />
+          </div>
+          <g-workerless-chip v-else />
         </g-list-item-content>
         <template
           #append
         >
-          <g-shoot-messages
-            v-if="!isShootMarkedForDeletion"
-            :shoot-item="shootItem"
-            filter="machine-image"
-          />
-          <g-worker-configuration
-            :shoot-item="shootItem"
-          />
+          <g-worker-configuration />
         </template>
       </g-list-item>
       <v-divider inset />
@@ -124,7 +141,6 @@ SPDX-License-Identifier: Apache-2.0
             <!-- the selectable purposes depend on the used secretbinding which the user needs to be able to read in order to properly show the purpose configuration dialog -->
             <g-purpose-configuration
               v-if="canGetSecrets"
-              :shoot-item="shootItem"
             />
           </template>
         </g-list-item>
@@ -157,19 +173,24 @@ SPDX-License-Identifier: Apache-2.0
           </template>
           <g-list-item-content label="Access Restrictions">
             <div
-              v-if="shootSelectedAccessRestrictions.length"
+              v-if="shootAccessRestrictions.length"
               class="d-flex flex-wrap align-center"
             >
-              <g-access-restriction-chips :selected-access-restrictions="shootSelectedAccessRestrictions" />
+              <g-access-restriction-chip
+                v-for="item in shootAccessRestrictions"
+                :id="item.key"
+                :key="item.key"
+                :title="item.title"
+                :description="item.description"
+                :options="item.options"
+              />
             </div>
             <span v-else>
               No access restrictions configured
             </span>
           </g-list-item-content>
           <template #append>
-            <g-access-restrictions-configuration
-              :shoot-item="shootItem"
-            />
+            <g-access-restrictions-configuration />
           </template>
         </g-list-item>
       </template>
@@ -183,7 +204,7 @@ SPDX-License-Identifier: Apache-2.0
           </template>
           <g-list-item-content>
             <template #label>
-              Add-ons <span class="text-caption">(not actively monitored and provided on a best-effort basis only)</span>
+              Add-ons <span class="text-caption">(not actively monitored and available for clusters with purpose evaluation only)</span>
             </template>
             <div
               v-if="shootAddonNames.length"
@@ -193,7 +214,7 @@ SPDX-License-Identifier: Apache-2.0
                 v-for="(name, index) in shootAddonNames"
                 :key="index"
                 size="small"
-                variant="outlined"
+                variant="tonal"
                 color="primary"
                 class="mr-2"
               >
@@ -203,7 +224,7 @@ SPDX-License-Identifier: Apache-2.0
             <span v-else>No addons configured</span>
           </g-list-item-content>
           <template #append>
-            <g-addon-configuration :shoot-item="shootItem" />
+            <g-addon-configuration />
           </template>
         </g-list-item>
       </template>
@@ -211,23 +232,28 @@ SPDX-License-Identifier: Apache-2.0
   </v-card>
 </template>
 
-<script>
-import { mapState } from 'pinia'
+<script setup>
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
 
 import { useConfigStore } from '@/store/config'
 import { useAuthzStore } from '@/store/authz'
 
-import GAccessRestrictionChips from '@/components/ShootAccessRestrictions/GAccessRestrictionChips'
+import GAccessRestrictionChip from '@/components/ShootAccessRestrictions/GAccessRestrictionChip'
 import GAccountAvatar from '@/components/GAccountAvatar'
 import GTimeString from '@/components/GTimeString'
-import GWorkerGroups from '@/components/ShootWorkers/GWorkerGroups'
+import GWorkerGroup from '@/components/ShootWorkers/GWorkerGroup'
+import GWorkerlessChip from '@/components/ShootWorkers/GWorkerlessChip.vue'
 import GWorkerConfiguration from '@/components/ShootWorkers/GWorkerConfiguration'
 import GAccessRestrictionsConfiguration from '@/components/ShootAccessRestrictions/GAccessRestrictionsConfiguration'
 import GPurposeConfiguration from '@/components/GPurposeConfiguration'
-import GShootVersion from '@/components/ShootVersion/GShootVersion'
+import GShootVersionConfiguration from '@/components/ShootVersion/GShootVersionConfiguration'
+import GShootVersionChip from '@/components/ShootVersion/GShootVersionChip'
 import GShootMessages from '@/components/ShootMessages/GShootMessages'
 import GAddonConfiguration from '@/components/ShootAddons/GAddonConfiguration'
 import GCopyBtn from '@/components/GCopyBtn'
+
+import { useShootItem } from '@/composables/useShootItem'
 
 import {
   isValidTerminationDate,
@@ -235,60 +261,62 @@ import {
   shootAddonList,
   transformHtml,
 } from '@/utils'
-import { shootItem } from '@/mixins/shootItem'
 
-import {
-  filter,
-  map,
-} from '@/lodash'
+import map from 'lodash/map'
+import filter from 'lodash/filter'
+import get from 'lodash/get'
 
-export default {
-  components: {
-    GAccessRestrictionChips,
-    GAccountAvatar,
-    GTimeString,
-    GWorkerGroups,
-    GWorkerConfiguration,
-    GAccessRestrictionsConfiguration,
-    GPurposeConfiguration,
-    GAddonConfiguration,
-    GShootVersion,
-    GShootMessages,
-    GCopyBtn,
-  },
-  mixins: [shootItem],
-  computed: {
-    ...mapState(useConfigStore, [
-      'sla',
-      'accessRestriction',
-    ]),
-    ...mapState(useAuthzStore, ['canGetSecrets']),
-    selfTerminationMessage () {
-      if (this.isValidTerminationDate) {
-        return `This cluster will self terminate ${getTimeStringTo(new Date(), new Date(this.shootExpirationTimestamp))}`
-      } else {
-        return 'This cluster is about to self terminate'
-      }
-    },
-    isValidTerminationDate () {
-      return isValidTerminationDate(this.shootExpirationTimestamp)
-    },
-    addon () {
-      return (name) => {
-        return this.shootAddons[name] || {}
-      }
-    },
-    shootAddonNames () {
-      return map(filter(shootAddonList, item => this.addon(item.name).enabled), 'title')
-    },
-    slaDescriptionHtml () {
-      return transformHtml(this.sla.description)
-    },
-    slaTitle () {
-      return this.sla.title
-    },
-  },
+const {
+  shootMetadata,
+  shootName,
+  shootCreatedBy,
+  shootPurpose,
+  shootExpirationTimestamp,
+  isShootMarkedForDeletion,
+  shootAddons,
+  hasShootWorkerGroups,
+  shootWorkerGroups,
+  shootAccessRestrictions,
+} = useShootItem()
+
+const configStore = useConfigStore()
+const {
+  sla,
+  accessRestriction,
+} = storeToRefs(configStore)
+
+const authzStore = useAuthzStore()
+const {
+  canGetSecrets,
+} = storeToRefs(authzStore)
+
+const selfTerminationMessage = computed(() => {
+  if (validTerminationDate.value) {
+    return `This cluster will self terminate ${getTimeStringTo(new Date(), new Date(shootExpirationTimestamp.value))}`
+  } else {
+    return 'This cluster is about to self terminate'
+  }
+})
+
+const validTerminationDate = computed(() => {
+  return isValidTerminationDate(shootExpirationTimestamp.value)
+})
+
+function getAddon (name) {
+  return get(shootAddons.value, [name], {})
 }
+
+const shootAddonNames = computed(() => {
+  return map(filter(shootAddonList, item => getAddon(item.name).enabled), 'title')
+})
+
+const slaDescriptionHtml = computed(() => {
+  return transformHtml(sla.value.description)
+})
+
+const slaTitle = computed(() => {
+  return sla.value.title
+})
 </script>
 
 <style lang="scss" scoped>

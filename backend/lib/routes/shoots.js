@@ -9,9 +9,10 @@
 const express = require('express')
 const { shoots } = require('../services')
 const { metricsRoute } = require('../middleware')
+const { trimObjectMetadata } = require('../utils')
 
 const router = module.exports = express.Router({
-  mergeParams: true
+  mergeParams: true,
 })
 
 const metricsMiddleware = metricsRoute('shoots')
@@ -23,7 +24,11 @@ router.route('/')
       const user = req.user
       const namespace = req.params.namespace
       const labelSelector = req.query.labelSelector
-      res.send(await shoots.list({ user, namespace, labelSelector }))
+      const shootList = await shoots.list({ user, namespace, labelSelector })
+      for (const object of shootList.items) {
+        trimObjectMetadata(object)
+      }
+      res.send(shootList)
     } catch (err) {
       next(err)
     }
@@ -33,7 +38,8 @@ router.route('/')
       const user = req.user
       const namespace = req.params.namespace
       const body = req.body
-      res.send(await shoots.create({ user, namespace, body }))
+      const onWarning = value => res.set('Warning', value)
+      res.send(await shoots.create({ user, namespace, body, onWarning }))
     } catch (err) {
       next(err)
     }
@@ -58,7 +64,19 @@ router
       const namespace = req.params.namespace
       const name = req.params.name
       const body = req.body
-      res.send(await shoots.replace({ user, namespace, name, body }))
+      const onWarning = value => res.set('Warning', value)
+      res.send(await shoots.replace({ user, namespace, name, body, onWarning }))
+    } catch (err) {
+      next(err)
+    }
+  })
+  .patch(async (req, res, next) => {
+    try {
+      const user = req.user
+      const namespace = req.params.namespace
+      const name = req.params.name
+      const body = req.body
+      res.send(await shoots.patch({ user, namespace, name, body }))
     } catch (err) {
       next(err)
     }
@@ -69,20 +87,6 @@ router
       const namespace = req.params.namespace
       const name = req.params.name
       res.send(await shoots.remove({ user, namespace, name }))
-    } catch (err) {
-      next(err)
-    }
-  })
-
-router.route('/:name/spec/kubernetes/enableStaticTokenKubeconfig')
-  .all(metricsMiddleware)
-  .put(async (req, res, next) => {
-    try {
-      const user = req.user
-      const namespace = req.params.namespace
-      const name = req.params.name
-      const body = req.body
-      res.send(await shoots.replaceEnableStaticTokenKubeconfig({ user, namespace, name, body }))
     } catch (err) {
       next(err)
     }
@@ -172,20 +176,6 @@ router.route('/:name/spec/controlPlane/highAvailability')
     }
   })
 
-router.route('/:name/spec/dns')
-  .all(metricsMiddleware)
-  .put(async (req, res, next) => {
-    try {
-      const user = req.user
-      const namespace = req.params.namespace
-      const name = req.params.name
-      const body = req.body
-      res.send(await shoots.replaceDns({ user, namespace, name, body }))
-    } catch (err) {
-      next(err)
-    }
-  })
-
 router.route('/:name/spec/provider')
   .all(metricsMiddleware)
   .patch(async (req, res, next) => {
@@ -250,6 +240,20 @@ router.route('/:name/spec/seedName')
       const name = req.params.name
       const body = req.body
       res.send(await shoots.replaceSeedName({ user, namespace, name, body }))
+    } catch (err) {
+      next(err)
+    }
+  })
+
+router.route('/:name/adminkubeconfig')
+  .all(metricsMiddleware)
+  .post(async (req, res, next) => {
+    try {
+      const user = req.user
+      const namespace = req.params.namespace
+      const name = req.params.name
+      const body = req.body
+      res.send(await shoots.createAdminKubeconfig({ user, namespace, name, body }))
     } catch (err) {
       next(err)
     }

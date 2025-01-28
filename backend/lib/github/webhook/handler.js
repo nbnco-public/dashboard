@@ -8,6 +8,7 @@
 
 const createError = require('http-errors')
 const { dashboardClient } = require('@gardener-dashboard/kube-client')
+const { isHttpError } = require('@gardener-dashboard/request')
 
 function currentMicroDateStr () {
   const date = new Date().toISOString()
@@ -20,13 +21,25 @@ async function updateLease () {
   const body = {
     spec: {
       holderIdentity: process.env.POD_NAME || 'gardener-dashboard',
-      renewTime: currentMicroDateStr()
-    }
+      renewTime: currentMicroDateStr(),
+    },
   }
   try {
     await dashboardClient['coordination.k8s.io'].leases.mergePatch(namespace, name, body)
   } catch (err) {
-    throw createError(500, `Failed to update lease: ${err.message}`)
+    if (isHttpError(err, 404)) {
+      // Lease not found, create it
+      try {
+        body.metadata = {
+          name,
+        }
+        await dashboardClient['coordination.k8s.io'].leases.create(namespace, body)
+      } catch (createErr) {
+        throw createError(500, `Failed to create lease: ${createErr.message}`)
+      }
+    } else {
+      throw createError(500, `Failed to update lease: ${err.message}`)
+    }
   }
 }
 

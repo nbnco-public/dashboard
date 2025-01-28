@@ -33,7 +33,7 @@ describe('github', function () {
 
   describe('#loadOpenIssues', () => {
     it('should initialize the cache with all open issues', async () => {
-      expect(octokit.paginate).toBeCalledTimes(1)
+      expect(octokit.paginate).toHaveBeenCalledTimes(1)
 
       const issues = cache.getIssues()
       expect(issues).toHaveLength(3)
@@ -57,7 +57,8 @@ describe('github', function () {
       beforeAll(() => {
         // Be careful when adding other tests in this block. E.g. express error handlers
         // won't be work when fake timers are enabled as the test in that case never complete.
-        jest.useFakeTimers().setSystemTime(now)
+        jest.useFakeTimers()
+        jest.setSystemTime(now)
       })
 
       afterAll(() => {
@@ -75,15 +76,15 @@ describe('github', function () {
           .send(body)
           .expect(204)
 
-        expect(mockRequest).toBeCalledTimes(1)
-        expect(mockRequest).toBeCalledWith(
+        expect(mockRequest).toHaveBeenCalledTimes(1)
+        expect(mockRequest).toHaveBeenCalledWith(
           expect.anything(),
           {
             spec: {
               holderIdentity: fixtures.env.POD_NAME,
-              renewTime: microDateStr
-            }
-          }
+              renewTime: microDateStr,
+            },
+          },
         )
       })
     })
@@ -99,7 +100,7 @@ describe('github', function () {
         .send(body)
         .expect(422)
 
-      expect(mockRequest).toBeCalledTimes(0)
+      expect(mockRequest).toHaveBeenCalledTimes(0)
     })
 
     it('should error if wrong HTTP method is used', async () => {
@@ -116,7 +117,7 @@ describe('github', function () {
           expect(res.headers.allow).toEqual('POST')
         })
 
-      expect(mockRequest).toBeCalledTimes(0)
+      expect(mockRequest).toHaveBeenCalledTimes(0)
     })
   })
 })

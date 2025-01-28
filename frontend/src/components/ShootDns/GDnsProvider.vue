@@ -6,55 +6,49 @@ SPDX-License-Identifier: Apache-2.0
 
 <template>
   <g-popover
+    v-model="popover"
     :toolbar-title="secretName"
   >
     <template #activator="{ props }">
       <v-chip
         v-bind="props"
         size="small"
+        density="comfortable"
         color="primary"
-        variant="outlined"
+        variant="tonal"
         class="cursor-pointer my-0 ml-0"
       >
         <g-vendor-icon
           :icon="type"
-          :size="20"
+          :size="14"
         />
         <span class="px-1">{{ secretName }}</span>
-        <v-icon
-          v-if="primary"
-          icon="mdi-star"
-          size="small"
-        />
       </v-chip>
     </template>
     <v-list min-width="300">
       <v-list-item
-        v-for="({title, value, description, to}) in dnsProviderDescriptions"
+        v-for="({title, value, to}) in dnsProviderDescriptions"
         :key="title"
       >
         <v-list-item-subtitle class="pt-1">
           {{ title }}
         </v-list-item-subtitle>
         <v-list-item-title v-if="to">
-          <router-link
-            class="text-anchor"
+          <g-text-router-link
             :to="to"
-          >
-            {{ value }} {{ description }}
-          </router-link>
+            :text="value"
+          />
         </v-list-item-title>
         <v-list-item-title v-else>
-          {{ value }} {{ description }}
+          {{ value }}
         </v-list-item-title>
       </v-list-item>
-      <v-list-item
-        v-if="secret"
-      >
+      <v-list-item v-if="secret">
         <g-secret-details-item-content
           class="pb-2"
           dns
           :secret="secret"
+          :provider-type="type"
           details-title
         />
       </v-list-item>
@@ -63,18 +57,22 @@ SPDX-License-Identifier: Apache-2.0
 </template>
 
 <script>
+import { mapActions } from 'pinia'
+
+import { useCredentialStore } from '@/store/credential'
+
 import GVendorIcon from '@/components/GVendorIcon'
 import GSecretDetailsItemContent from '@/components/Secrets/GSecretDetailsItemContent.vue'
+import GTextRouterLink from '@/components/GTextRouterLink.vue'
 
-import {
-  join,
-  get,
-} from '@/lodash'
+import get from 'lodash/get'
+import join from 'lodash/join'
 
 export default {
   components: {
     GVendorIcon,
     GSecretDetailsItemContent,
+    GTextRouterLink,
   },
   props: {
     type: {
@@ -101,19 +99,23 @@ export default {
       type: Object,
       required: false,
     },
-    secret: {
-      type: Object,
-      required: false,
-    },
+  },
+  data () {
+    return {
+      popover: false,
+    }
   },
   computed: {
+    secret () {
+      return this.getSecret({ namespace: this.shootNamespace, name: this.secretName })
+    },
     dnsProviderDescriptions () {
-      const description = []
-      description.push({
+      const descriptions = []
+      descriptions.push({
         title: 'DNS Provider Type',
         value: this.type,
       })
-      description.push({
+      descriptions.push({
         title: 'Credential',
         value: this.secretName,
         to: {
@@ -124,36 +126,41 @@ export default {
           },
         },
       })
-      description.push({
+      descriptions.push({
         title: 'Primary DNS Provider',
         value: this.primary ? 'true' : 'false',
       })
-      if (get(this.domains, 'exclude.length')) {
-        description.push({
-          title: 'Exclude Domains',
-          value: join(this.domains.exclude, ', '),
-        })
-      }
-      if (get(this.domains, 'include.length')) {
-        description.push({
+      if (get(this.domains, ['include', 'length'])) {
+        descriptions.push({
           title: 'Include Domains',
           value: join(this.domains.include, ', '),
         })
       }
-      if (get(this.zones, 'exclude.length')) {
-        description.push({
-          title: 'Exclude Zones',
-          value: join(this.zones.exclude, ', '),
+      if (get(this.domains, ['exclude', 'length'])) {
+        descriptions.push({
+          title: 'Exclude Domains',
+          value: join(this.domains.exclude, ', '),
         })
       }
-      if (get(this.zones, 'include.length')) {
-        description.push({
+      if (get(this.zones, ['include', 'length'])) {
+        descriptions.push({
           title: 'Include Zones',
           value: join(this.zones.include, ', '),
         })
       }
-      return description
+      if (get(this.zones, ['exclude', 'length'])) {
+        descriptions.push({
+          title: 'Exclude Zones',
+          value: join(this.zones.exclude, ', '),
+        })
+      }
+      return descriptions
     },
+  },
+  methods: {
+    ...mapActions(useCredentialStore, [
+      'getSecret',
+    ]),
   },
 }
 </script>

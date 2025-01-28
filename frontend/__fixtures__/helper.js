@@ -7,11 +7,6 @@
 import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
-import * as labs from 'vuetify/labs/components'
-
-import componentsPlugin from '@/plugins/components'
-import utilsPlugin from '@/plugins/utils'
-import notifyPlugin from '@/plugins/notify'
 
 import 'vuetify/styles'
 
@@ -20,19 +15,7 @@ export function createVuetifyPlugin () {
     icons: {
       defaultSet: 'mdi',
     },
-    components: {
-      ...components,
-      ...labs,
-    },
+    components,
     directives,
   })
-}
-
-export function createPlugins () {
-  return [
-    createVuetifyPlugin(),
-    componentsPlugin,
-    utilsPlugin,
-    notifyPlugin,
-  ]
 }

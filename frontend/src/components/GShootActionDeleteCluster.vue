@@ -5,168 +5,126 @@ SPDX-License-Identifier: Apache-2.0
 -->
 
 <template>
-  <g-shoot-action-dialog
-    v-if="dialog"
+  <g-action-button-dialog
     ref="actionDialog"
-    :shoot-item="shootItem"
+    width="600"
     :caption="caption"
+    :text="buttonText"
     confirm-button-text="Delete"
     confirm-required
-    width="600"
-  >
-    <v-list>
-      <v-list-item-subtitle>
-        Created By
-      </v-list-item-subtitle>
-      <v-list-item-title>
-        <g-account-avatar
-          :account-name="shootCreatedBy"
-          :size="22"
-        />
-      </v-list-item-title>
-    </v-list>
-    <p>
-      Type <span class="font-weight-bold">{{ shootName }}</span> below and confirm the deletion of the cluster and all of its content.
-    </p>
-    <p class="mt-2 text-error font-weight-bold">
-      This action cannot be undone.
-    </p>
-    <p v-if="isShootReconciliationDeactivated">
-      <v-row class="fill-height">
-        <v-icon
-          color="warning"
-          class="mr-1"
-        >
-          mdi-alert-box
-        </v-icon>
-        <span>The cluster will not be deleted as long as reconciliation is deactivated.</span>
-      </v-row>
-    </p>
-  </g-shoot-action-dialog>
-  <g-shoot-action-button
-    v-if="button"
-    ref="actionButton"
-    :shoot-item="shootItem"
     icon="mdi-delete"
-    :text="buttonText"
-    :caption="caption"
-    @click="internalValue = true"
-  />
+    @dialog-opened="onConfigurationDialogOpened"
+  >
+    <template #content>
+      <v-card-text>
+        <div>
+          Created By
+          <g-account-avatar
+            :account-name="shootCreatedBy "
+            :size="22"
+            class="my-2"
+          />
+        </div>
+        <div class="mt-2">
+          Type <span class="font-weight-bold">{{ shootName }}</span> below and confirm the deletion of the cluster and all of its content.
+        </div>
+        <div class="mb-2 font-weight-bold">
+          This action cannot be undone.
+        </div>
+        <v-alert
+          v-if="isShootReconciliationDeactivated"
+          class="my-2"
+          type="warning"
+        >
+          <span>The cluster will not be deleted as long as reconciliation is deactivated.</span>
+        </v-alert>
+      </v-card-text>
+    </template>
+  </g-action-button-dialog>
 </template>
 
 <script>
-import { mapActions } from 'pinia'
+import { computed } from 'vue'
 
 import { useShootStore } from '@/store/shoot'
 
-import GShootActionButton from '@/components/GShootActionButton.vue'
-import GShootActionDialog from '@/components/GShootActionDialog.vue'
+import GActionButtonDialog from '@/components/dialogs/GActionButtonDialog.vue'
 import GAccountAvatar from '@/components/GAccountAvatar.vue'
 
-import { shootItem } from '@/mixins/shootItem'
+import { useShootItem } from '@/composables/useShootItem'
+
 import { errorDetailsFromError } from '@/utils/error'
 
 export default {
   components: {
-    GShootActionButton,
-    GShootActionDialog,
+    GActionButtonDialog,
     GAccountAvatar,
   },
-  mixins: [shootItem],
   inject: ['logger'],
   props: {
-    modelValue: {
-      type: Boolean,
-      required: true,
-    },
     text: {
       type: Boolean,
       default: false,
     },
-    dialog: {
-      type: Boolean,
-      default: false,
-    },
-    button: {
-      type: Boolean,
-      default: false,
-    },
-    small: {
-      type: Boolean,
-      default: false,
-    },
   },
-  emits: [
-    'update:modelValue',
-  ],
-  data () {
-    return {
-      renderDialog: false,
-      errorMessage: null,
-      detailedErrorMessage: null,
-    }
-  },
-  computed: {
-    internalValue: {
-      get () {
-        return this.modelValue
-      },
-      set (value) {
-        this.$emit('update:modelValue', value)
-      },
-    },
-    icon () {
-      return 'mdi-delete'
-    },
-    caption () {
-      return this.isShootMarkedForDeletion
-        ? 'Cluster already marked for deletion'
-        : this.buttonTitle
-    },
-    buttonTitle () {
+  setup (props) {
+    const {
+      shootItem,
+      shootNamespace,
+      shootName,
+      shootCreatedBy,
+      isShootMarkedForDeletion,
+      isShootReconciliationDeactivated,
+    } = useShootItem()
+
+    const caption = computed(() => {
+      if (isShootMarkedForDeletion.value) {
+        return 'Cluster already marked for deletion'
+      }
+      return buttonTitle.value
+    })
+
+    const buttonTitle = computed(() => {
       return 'Delete Cluster'
-    },
-    buttonText () {
-      if (!this.text) {
+    })
+
+    const buttonText = computed(() => {
+      if (!props.text) {
         return
       }
-      return this.buttonTitle
-    },
-  },
-  watch: {
-    modelValue (value) {
-      if (this.dialog) {
-        const actionDialog = this.$refs.actionDialog
-        if (value) {
-          actionDialog.showDialog()
-          this.waitForConfirmation()
-        } else {
-          actionDialog.hideDialog()
-        }
-      }
-    },
+      return buttonTitle.value
+    })
+
+    const shootStore = useShootStore()
+    const {
+      deleteShoot,
+    } = shootStore
+
+    return {
+      shootItem,
+      shootNamespace,
+      shootName,
+      shootCreatedBy,
+      isShootMarkedForDeletion,
+      isShootReconciliationDeactivated,
+      caption,
+      buttonText,
+      deleteShoot,
+    }
   },
   methods: {
-    ...mapActions(useShootStore, [
-      'deleteShoot',
-    ]),
-    waitForConfirmation () {
-      this.$nextTick(async () => {
-        const actionDialog = this.$refs.actionDialog
-        try {
-          if (await actionDialog.waitForDialogClosed()) {
-            this.deleteCluster()
-          }
-        } catch (err) {
-          /* ignore error */
-        } finally {
-          this.internalValue = false
-        }
-      })
+    async onConfigurationDialogOpened () {
+      const confirmed = await this.$refs.actionDialog.waitForDialogClosed()
+      if (confirmed) {
+        this.deleteCluster()
+      }
     },
     async deleteCluster () {
       try {
-        await this.deleteShoot({ name: this.shootName, namespace: this.shootNamespace })
+        await this.deleteShoot({
+          name: this.shootName,
+          namespace: this.shootNamespace,
+        })
       } catch (err) {
         const errorMessage = 'Cluster deletion failed'
         const errorDetails = errorDetailsFromError(err)
@@ -175,13 +133,6 @@ export default {
         this.logger.error(errorMessage, errorDetails.errorCode, errorDetails.detailedMessage, err)
       }
     },
-
   },
 }
 </script>
-
-<style lang="scss" scoped>
-  p {
-    margin-bottom: 0
-  }
-</style>

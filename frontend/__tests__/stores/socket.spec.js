@@ -42,9 +42,6 @@ vi.mock('socket.io-client', async () => {
   }
 })
 
-const globalSetImmediate = global.setImmediate
-const flushPromises = () => new Promise(resolve => globalSetImmediate(resolve))
-
 const noop = () => Promise.resolve()
 
 describe('store', () => {
@@ -53,6 +50,7 @@ describe('store', () => {
     let authnStore
     let mockEnsureValidToken // eslint-disable-line no-unused-vars
     let mockSignout // eslint-disable-line no-unused-vars
+    let mockIsExpired // eslint-disable-line no-unused-vars
 
     beforeEach(() => {
       vi.useFakeTimers()
@@ -64,11 +62,13 @@ describe('store', () => {
       authnStore = useAuthnStore()
       mockEnsureValidToken = vi.spyOn(authnStore, 'ensureValidToken').mockImplementation(noop)
       mockSignout = vi.spyOn(authnStore, 'signout').mockImplementation(noop)
+      mockIsExpired = vi.spyOn(authnStore, 'isExpired').mockReturnValue(false)
       socketStore = useSocketStore()
     })
 
     afterEach(() => {
       vi.useRealTimers()
+      mockSocket.removeAllListeners()
     })
 
     it('should create the socket instance', () => {
@@ -108,8 +108,8 @@ describe('store', () => {
       mockSocket.emit('disconnect', 'io server disconnect')
       expect(socketStore.connected).toBe(false)
       expect(socketStore.active).toBe(true)
-      vi.advanceTimersToNextTimer()
-      await flushPromises()
+      await vi.runOnlyPendingTimersAsync()
+
       expect(mockSocket.connect).toBeCalledTimes(1)
     })
   })

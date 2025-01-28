@@ -33,7 +33,7 @@ import {
   toRef,
 } from 'vue'
 
-import { startsWith } from '@/lodash'
+import startsWith from 'lodash/startsWith'
 
 const props = defineProps({
   icon: {
@@ -69,6 +69,8 @@ const iconSrc = computed(() => {
       return new URL('/src/assets/vsphere.svg', import.meta.url)
     case 'metal':
       return new URL('/src/assets/metal.svg', import.meta.url)
+    case 'ironcore':
+      return new URL('/src/assets/ironcore.svg', import.meta.url)
     case 'onmetal':
       return new URL('/src/assets/onmetal.svg', import.meta.url)
     // dns
@@ -89,6 +91,8 @@ const iconSrc = computed(() => {
       return new URL('/src/assets/infoblox-dns.svg', import.meta.url)
     case 'netlify-dns':
       return new URL('/src/assets/netlify-dns.svg', import.meta.url)
+    case 'rfc2136':
+      return new URL('/src/assets/rfc2136.svg', import.meta.url)
 
     // os
     case 'coreos':
@@ -129,11 +133,10 @@ const iconStyle = computed(() => {
 </script>
 
 <style lang="scss" scoped>
-  @import 'vuetify/settings';
-
-  $grey-darken-2: map-get($grey, 'darken-2');
+  @use 'vuetify/settings' as vuetify;
+  @use 'sass:map';
 
   .v-theme--dark .icon-background {
-    background-color: $grey-darken-2
+    background-color: map.get(vuetify.$grey, 'darken-2');
   }
 </style>

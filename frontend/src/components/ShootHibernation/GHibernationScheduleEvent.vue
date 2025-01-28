@@ -5,79 +5,72 @@ SPDX-License-Identifier: Apache-2.0
 -->
 
 <template>
-  <v-row
-    align="center"
-    class="ma-0"
+  <div
+    class="d-flex flex-nowrap align-center"
   >
-    <v-col cols="11">
-      <v-row class="ma-0">
-        <v-col cols="5">
-          <v-select
-            ref="selectedDays"
-            v-model="selectedDays"
-            color="primary"
-            item-color="primary"
-            :items="weekdays"
-            return-object
-            :error-messages="getErrorMessages('selectedDays')"
-            chips
-            label="Weekdays on which this rule shall be active"
-            multiple
-            closable-chips
-            variant="underlined"
-            @blur="touchIfNothingFocused"
-            @update:model-value="onInputSelectedDays"
-          />
-        </v-col>
-        <v-col cols="2">
-          <g-time-text-field
-            ref="wakeUpTime"
-            v-model="wakeUpTime"
-            color="primary"
-            label="Wake up at"
-            :error-messages="getErrorMessages('wakeUpTime')"
-            clearable
-            variant="underlined"
-            @blur="touchIfNothingFocused"
-            @update:model-value="onInputWakeUpTime"
-          />
-        </v-col>
-        <v-col cols="2">
-          <g-time-text-field
-            ref="hibernateTime"
-            v-model="hibernateTime"
-            color="primary"
-            label="Hibernate at"
-            :error-messages="getErrorMessages('hibernateTime')"
-            clearable
-            variant="underlined"
-            @blur="touchIfNothingFocused"
-            @update:model-value="onInputHibernateTime"
-          />
-        </v-col>
-        <v-col cols="3">
-          <v-autocomplete
-            v-model="selectedLocation"
-            color="primary"
-            label="Location"
-            :items="locations"
-            append-icon="mdi-map-marker-outline"
-            variant="underlined"
-            @update:model-value="onInputSelectedLocation"
-          />
-        </v-col>
-      </v-row>
-    </v-col>
-    <v-col cols="1">
+    <div class="d-flex flex-wrap">
+      <div class="large-input">
+        <v-select
+          ref="selectedDays"
+          v-model="v$.selectedDays.$model"
+          color="primary"
+          item-color="primary"
+          :items="weekdays"
+          return-object
+          :error-messages="getErrorMessages(v$.selectedDays)"
+          chips
+          label="Days of the week on which this rule shall be active"
+          multiple
+          closable-chips
+          variant="underlined"
+          @blur="touchIfNothingFocused"
+        />
+      </div>
+      <div class="regular-input">
+        <g-time-text-field
+          ref="wakeUpTime"
+          v-model="v$.wakeUpTime.$model"
+          color="primary"
+          label="Wake up at"
+          :error-messages="getErrorMessages(v$.wakeUpTime)"
+          clearable
+          variant="underlined"
+          @blur="touchIfNothingFocused"
+        />
+      </div>
+      <div class="regular-input">
+        <g-time-text-field
+          ref="hibernateTime"
+          v-model="v$.hibernateTime.$model"
+          color="primary"
+          label="Hibernate at"
+          :error-messages="getErrorMessages(v$.hibernateTime)"
+          clearable
+          variant="underlined"
+          @blur="touchIfNothingFocused"
+        />
+      </div>
+      <div class="regular-input">
+        <v-autocomplete
+          v-model="v$.selectedLocation.$model"
+          color="primary"
+          label="Location"
+          :items="locations"
+          append-icon="mdi-map-marker-outline"
+          variant="underlined"
+        />
+      </div>
+    </div>
+    <div class="ml-4 mr-2">
       <v-btn
         size="x-small"
-        variant="outlined"
+        variant="tonal"
         icon="mdi-close"
         color="grey"
-        @click.stop="removeScheduleEvent"
+        @click.stop="removeHibernationScheduleEvent(id)"
       />
-    </v-col>
-  </v-row>
+    </div>
+  </div>
 </template>
 
 <script>
@@ -89,67 +82,80 @@ import { useVuelidate } from '@vuelidate/core'
 
 import GTimeTextField from '@/components/GTimeTextField.vue'
 
-import { getValidationErrors } from '@/utils'
-import moment from '@/utils/moment'
+import { useShootContext } from '@/composables/useShootContext'
 
 import {
-  join,
-  split,
-  get,
-  map,
-  find,
-  isEqual,
-  sortBy,
-} from '@/lodash'
+  withMessage,
+  withFieldName,
+} from '@/utils/validators'
+import { getErrorMessages } from '@/utils'
+import {
+  parseTimeString,
+  formatTimeString,
+} from '@/utils/hibernationSchedule'
+import moment from '@/utils/moment'
 
-const validationErrors = {
-  selectedDays: {
-    required: 'Weekdays is required',
-  },
-  hibernateTime: {
-    required: 'You need to specify at least hibernation or wake up time',
-  },
-  wakeUpTime: {
-    required: 'You need to specify at least hibernation or wake up time',
-  },
-  selectedLocation: {
-    required: 'Location is required',
-  },
-}
+import join from 'lodash/join'
+import split from 'lodash/split'
+import compact from 'lodash/compact'
+import get from 'lodash/get'
+import set from 'lodash/set'
+import map from 'lodash/map'
+import filter from 'lodash/filter'
+import isEmpty from 'lodash/isEmpty'
+import includes from 'lodash/includes'
 
 export default {
   components: {
     GTimeTextField,
   },
   props: {
-    scheduleEvent: {
-      type: Object,
+    id: {
+      type: String,
       required: true,
     },
   },
-  emits: [
-    'update-location',
-    'update-selected-days',
-    'remove-schedule-event',
-    'update-wake-up-time',
-    'update-hibernate-time',
-  ],
   setup () {
+    const {
+      getHibernationScheduleEvent,
+      removeHibernationScheduleEvent,
+    } = useShootContext()
+
     return {
       v$: useVuelidate(),
+      getHibernationScheduleEvent,
+      removeHibernationScheduleEvent,
     }
   },
   validations () {
-    return this.validators
+    const rules = {
+      selectedDays: withFieldName('Hibernation Selected Days', {
+        required,
+      }),
+      selectedLocation: withFieldName('Hibernation Location', {
+        required,
+      }),
+    }
+
+    const hibernateTimeRules = {
+      required: withMessage('You need to specify at least hibernation or wake up time',
+        requiredIf(() => !this.wakeUpTime),
+      ),
+    }
+    rules.hibernateTime = withFieldName('Hibernation Time', hibernateTimeRules)
+
+    const wakeUpTimeRules = {
+      required: withMessage('You need to specify at least hibernation or wake up time',
+        requiredIf(() => !this.hibernateTime),
+      ),
+    }
+    rules.wakeUpTime = withFieldName('Hibernation Wake Up Time', wakeUpTimeRules)
+
+    return rules
   },
   data () {
     return {
-      validationErrors,
       locations: moment.tz.names(),
-      selectedLocation: null,
-      wakeUpTime: null,
-      hibernateTime: null,
-      selectedDays: null,
       weekdays: [
         {
           title: 'Mon',
@@ -190,113 +196,82 @@ export default {
     }
   },
   computed: {
-    id () {
-      return this.scheduleEvent.id
+    scheduleEvent () {
+      return this.getHibernationScheduleEvent(this.id)
     },
-    validators () {
-      return {
-        selectedDays: {
-          required,
-        },
-        hibernateTime: {
-          required: requiredIf(function () {
-            return !this.wakeUpTime
-          }),
-        },
-        wakeUpTime: {
-          required: requiredIf(function () {
-            return !this.hibernateTime
-          }),
-        },
-        selectedLocation: {
-          required,
-        },
-      }
+    selectedLocation: {
+      get () {
+        return get(this.scheduleEvent, ['location'])
+      },
+      set (value) {
+        set(this.scheduleEvent, ['location'], value)
+      },
     },
-  },
-  mounted () {
-    this.selectedLocation = this.scheduleEvent.location
-    this.wakeUpTime = this.getTime(this.scheduleEvent.end)
-    this.hibernateTime = this.getTime(this.scheduleEvent.start)
-    this.setSelectedDays(this.scheduleEvent)
-    this.updateSelectedDays() // trigger sort
+    wakeUpTime: {
+      get () {
+        return formatTimeString(get(this.scheduleEvent, ['end']))
+      },
+      set (value) {
+        const time = parseTimeString(value)
+        set(this.scheduleEvent, ['end', 'minute'], time?.minute)
+        set(this.scheduleEvent, ['end', 'hour'], time?.hour)
+
+        if (!get(this.scheduleEvent, ['end', 'weekdays'])) {
+          const weekdays = get(this.scheduleEvent, ['start', 'weekdays'])
+          set(this.scheduleEvent, ['end', 'weekdays'], weekdays)
+        }
+      },
+    },
+    hibernateTime: {
+      get () {
+        return formatTimeString(get(this.scheduleEvent, ['start']))
+      },
+      set (value) {
+        const time = parseTimeString(value)
+        set(this.scheduleEvent, ['start', 'minute'], time?.minute)
+        set(this.scheduleEvent, ['start', 'hour'], time?.hour)
+
+        if (!get(this.scheduleEvent, ['start', 'weekdays'])) {
+          const weekdays = get(this.scheduleEvent, ['end', 'weekdays'])
+          set(this.scheduleEvent, ['start', 'weekdays'], weekdays)
+        }
+      },
+    },
+    selectedDays: {
+      get () {
+        const startDays = get(this.scheduleEvent, ['start', 'weekdays'])
+        const endDays = get(this.scheduleEvent, ['end', 'weekdays'])
+        const days = compact(split(startDays ?? endDays, ','))
+        if (isEmpty(days)) {
+          return null
+        }
+        const dayValues = map(days, value => parseInt(value, 10))
+        return filter(this.weekdays, ({ value }) => includes(dayValues, value))
+      },
+      set (value) {
+        const weekdays = join(map(value, 'value'), ',')
+        set(this.scheduleEvent, ['start', 'weekdays'], weekdays)
+        set(this.scheduleEvent, ['end', 'weekdays'], weekdays)
+      },
+    },
   },
   methods: {
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
-    updateTime ({ eventName, time }) {
-      const momentObj = moment(time, 'HHmm')
-      let hour
-      let minute
-      const id = this.id
-      if (momentObj.isValid()) {
-        hour = momentObj.format('HH')
-        minute = momentObj.format('mm')
-      }
-      this.$emit(eventName, { hour, minute, id })
-    },
-    getTime ({ hour, minute } = {}) {
-      if (hour && minute) {
-        const momentObj = moment()
-          .hour(hour)
-          .minute(minute)
-        if (momentObj.isValid()) {
-          return momentObj.format('HH:mm')
-        }
-      }
-    },
-    updateLocation (location) {
-      const id = this.id
-      this.$emit('update-location', { location, id })
-    },
-    setSelectedDays (scheduleEvent) {
-      const days = get(scheduleEvent, 'start.weekdays', get(scheduleEvent, 'end.weekdays'))
-      if (days) {
-        const daysArray = map(split(days, ','), day => find(this.weekdays, { value: parseInt(day) }))
-        if (!isEqual(daysArray, this.selectedDays)) {
-          this.selectedDays = daysArray
-        }
-      } else {
-        this.selectedDays = null
-      }
-    },
-    updateSelectedDays () {
-      let weekdays
-      if (this.selectedDays) {
-        this.selectedDays = sortBy(this.selectedDays, 'sortValue')
-        weekdays = join(map(this.selectedDays, 'value'), ',')
-      }
-      const id = this.id
-      this.$emit('update-selected-days', { weekdays, id })
-    },
-    removeScheduleEvent () {
-      this.$emit('remove-schedule-event')
-    },
     touchIfNothingFocused () {
-      if (!get(this, '$refs.selectedDays.isFocused') &&
-          !get(this, '$refs.wakeUpTime.isFocused') &&
-          !get(this, '$refs.hibernateTime.isFocused')) {
+      if (!get(this, ['$refs', 'selectedDays', 'isFocused']) &&
+          !get(this, ['$refs', 'wakeUpTime', 'isFocused']) &&
+          !get(this, ['$refs', 'hibernateTime', 'isFocused'])) {
         this.v$.selectedDays.$touch()
         this.v$.wakeUpTime.$touch()
         this.v$.hibernateTime.$touch()
       }
     },
-    onInputSelectedDays () {
-      this.v$.selectedDays.$touch()
-      this.updateSelectedDays()
-    },
-    onInputWakeUpTime () {
-      this.v$.wakeUpTime.$touch()
-      this.updateTime({ eventName: 'update-wake-up-time', time: this.wakeUpTime })
-    },
-    onInputHibernateTime () {
-      this.v$.wakeUpTime.$touch()
-      this.updateTime({ eventName: 'update-hibernate-time', time: this.hibernateTime })
-    },
-    onInputSelectedLocation () {
-      this.updateLocation(this.selectedLocation)
-    },
+    getErrorMessages,
   },
 }
 </script>
+
+<style lang="scss" scoped>
+:deep(.v-chip--disabled) {
+  opacity: 1;
+}
+</style>

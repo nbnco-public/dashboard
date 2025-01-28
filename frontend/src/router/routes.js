@@ -17,6 +17,7 @@ import GDefault from '@/layouts/GDefault.vue'
 import GError from '@/views/GError.vue'
 import GNotFound from '@/views/GNotFound.vue'
 import GProjectPlaceholder from '@/views/GProjectPlaceholder.vue'
+import GNewShootPlaceholder from '@/views/GNewShootPlaceholder.vue'
 import GNewShootEditor from '@/views/GNewShootEditor.vue'
 import GShootItemPlaceholder from '@/views/GShootItemPlaceholder.vue'
 import GShootItemEditor from '@/views/GShootItemEditor.vue'
@@ -31,7 +32,6 @@ import {
   shootListBreadcrumbs,
   shootItemBreadcrumbs,
   shootItemTerminalBreadcrumbs,
-  secretItemBreadcrumbs,
   secretsBreadcrumbs,
   newShootBreadcrumbs,
   newShootEditorBreadcrumbs,
@@ -56,7 +56,7 @@ const GShootItem = () => import('@/views/GShootItem.vue')
 const GShootItemTerminal = () => import('@/views/GShootItemTerminal.vue')
 
 export function createRoutes () {
-  const appStore = useAppStore
+  const appStore = useAppStore()
   const authnStore = useAuthnStore()
   const authzStore = useAuthzStore()
   const projectStore = useProjectStore()
@@ -101,15 +101,32 @@ export function createRoutes () {
       children: [
         { path: '', redirect: 'shoots' },
         shootListRoute('shoots'),
-        newShootRoute('shoots/+'),
-        newShootEditorRoute('shoots/+/yaml'),
+        newShootHierarchy('shoots/+'),
         shootItemHierarchy('shoots/:name'),
         secretListRoute('secrets'),
-        secretItemRoute('secrets/:name'),
         membersRoute('members'),
         administrationRoute('administration'),
         { path: 'term', redirect: 'term/garden' },
         gardenTerminalRoute('term/garden'),
+        {
+          path: ':pathMatch(.*)*',
+          component: GNotFound,
+          meta: {
+            breadcrumbs: notFoundBreadcrumbs,
+          },
+        },
+      ],
+    }
+  }
+
+  /* New Shoot Hierachy "/namespace/:namespace/shoots/+" */
+  function newShootHierarchy (path) {
+    return {
+      path,
+      component: GNewShootPlaceholder,
+      children: [
+        newShootRoute(''),
+        newShootEditorRoute('yaml'),
         {
           path: ':pathMatch(.*)*',
           component: GNotFound,
@@ -197,6 +214,7 @@ export function createRoutes () {
       name: 'NewProject',
       component: GHome,
       meta: {
+        title: 'New Project',
         namespaced: false,
         projectScope: false,
         breadcrumbs: newProjectBreadcrumbs,
@@ -250,6 +268,7 @@ export function createRoutes () {
           title: 'Clusters',
           icon: 'mdi-hexagon-multiple',
         },
+        title: 'Clusters',
         projectScope: false,
         breadcrumbs: shootListBreadcrumbs,
       },
@@ -262,7 +281,9 @@ export function createRoutes () {
       name: 'NewShoot',
       component: GNewShoot,
       meta: {
+        title: 'New Cluster',
         breadcrumbs: newShootBreadcrumbs,
+        tabKey: 'newShootOverview',
         tabs: newShootTabs,
       },
     }
@@ -274,7 +295,9 @@ export function createRoutes () {
       name: 'NewShootEditor',
       component: GNewShootEditor,
       meta: {
+        title: 'New Cluster Editor',
         breadcrumbs: newShootEditorBreadcrumbs,
+        tabKey: 'newShootYaml',
         tabs: newShootTabs,
       },
     }
@@ -286,7 +309,9 @@ export function createRoutes () {
       name: 'ShootItem',
       component: GShootItem,
       meta: {
+        title: 'Cluster Details',
         breadcrumbs: shootItemBreadcrumbs,
+        tabKey: 'shootOverview',
         tabs: shootItemTabs,
       },
     }
@@ -298,7 +323,9 @@ export function createRoutes () {
       name: 'ShootItemEditor',
       component: GShootItemEditor,
       meta: {
+        title: 'Cluster Editor',
         breadcrumbs: shootItemBreadcrumbs,
+        tabKey: 'shootYaml',
         tabs: shootItemTabs,
       },
     }
@@ -310,7 +337,9 @@ export function createRoutes () {
       name: 'ShootItemHibernationSettings',
       component: GShootItem,
       meta: {
+        title: 'Cluster Details',
         breadcrumbs: shootItemBreadcrumbs,
+        tabKey: 'shootOverview',
         tabs: shootItemTabs,
       },
     }
@@ -322,12 +351,13 @@ export function createRoutes () {
       name: 'ShootItemTerminal',
       component: GShootItemTerminal,
       meta: {
+        title: 'Cluster Terminal',
         breadcrumbs: shootItemTerminalBreadcrumbs,
       },
       beforeEnter (to, from) {
         if (!authzStore.hasShootTerminalAccess) {
           appStore.setError(new Error('Access to cluster terminal is not allowed'))
-          return false
+          return from
         }
       },
     }
@@ -347,17 +377,6 @@ export function createRoutes () {
           },
         },
         breadcrumbs: secretsBreadcrumbs,
-      },
-    }
-  }
-
-  function secretItemRoute (path) {
-    return {
-      path,
-      name: 'Secret',
-      component: GSecrets,
-      meta: {
-        breadcrumbs: secretItemBreadcrumbs,
       },
     }
   }
@@ -405,12 +424,13 @@ export function createRoutes () {
             return !(authzStore.hasGardenTerminalAccess && authnStore.isAdmin)
           },
         },
+        title: 'Garden Cluster Terminal',
         breadcrumbs: terminalBreadcrumbs,
       },
       beforeEnter (to, from) {
         if (!authzStore.hasGardenTerminalAccess) {
           appStore.setError(new Error('Access to garden terminal is not allowed'))
-          return false
+          return from
         }
         to.params.target = 'garden'
       },

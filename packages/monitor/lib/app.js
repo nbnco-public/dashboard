@@ -23,20 +23,22 @@ app.get('/metrics', async (req, res, next) => {
     res
       .set({
         'cache-control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'content-type': register.contentType
+        'content-type': register.contentType,
       })
       .send(metrics)
   } catch (err) {
     next(err)
   }
 })
-app.use((req, res, next) => next(createError(404)))
+app.use((req, res, next) => {
+  next(createError(404, `No matching route: ${req.method} ${req.originalUrl}`))
+})
 app.use((err, req, res, next) => {
   const { message, status = 500 } = err
   logger.error('Error in monitoring server: %s', message)
   res.status(status).json({
     status,
-    message
+    message,
   })
 })
 

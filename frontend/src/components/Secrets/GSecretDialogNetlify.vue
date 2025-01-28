@@ -7,10 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    vendor="netlify-dns"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
     create-title="Add new Netlify Secret"
     replace-title="Replace Netlify Secret"
   >
@@ -20,7 +18,7 @@ SPDX-License-Identifier: Apache-2.0
           v-model="apiToken"
           color="primary"
           label="Netlify API Token"
-          :error-messages="getErrorMessages('apiToken')"
+          :error-messages="getErrorMessages(v$.apiToken)"
           :append-icon="hideApiToken ? 'mdi-eye' : 'mdi-eye-off'"
           :type="hideApiToken ? 'password' : 'text'"
           variant="underlined"
@@ -34,16 +32,15 @@ SPDX-License-Identifier: Apache-2.0
     <template #help-slot>
       <div>
         <p>
-          You need to provide an access token for Netlify to allow the dns-controller-manager to authenticate to Netlify DNS API.
+          You need to provide an access token for Netlify to allow the dns-controller-manager to authenticate with the Netlify DNS API.
         </p>
         <p>
-          Then base64 encode the token. For eg. if the generated token in 1234567890123456, use
+          Then, base64 encode the token. For example, if the generated token in 1234567890123456, use
         </p>
+        <pre>$ echo -n '1234567890123456789' | base64</pre>
         <p>
-          <pre>$ echo -n '1234567890123456789' | base64</pre>
-        </p>
-        <p>
-          For details see <g-external-link url="https://docs.netlify.com/cli/get-started/#obtain-a-token-in-the-netlify-ui" />
+          For details, see
+          <g-external-link url="https://docs.netlify.com/cli/get-started/#obtain-a-token-in-the-netlify-ui" />
         </p>
       </div>
     </template>
@@ -57,13 +54,10 @@ import { required } from '@vuelidate/validators'
 import GSecretDialog from '@/components/Secrets/GSecretDialog'
 import GExternalLink from '@/components/GExternalLink'
 
-import { getValidationErrors } from '@/utils'
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
 
-const validationErrors = {
-  apiToken: {
-    required: 'You can\'t leave this empty.',
-  },
-}
+import { getErrorMessages } from '@/utils'
+import { withFieldName } from '@/utils/validators'
 
 export default {
   components: {
@@ -75,7 +69,7 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
   },
@@ -83,20 +77,28 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const { apiToken } = secretStringDataRefs({
+      apiToken: 'apiToken',
+    })
+
     return {
+      apiToken,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      apiToken: undefined,
       hideApiToken: true,
-      validationErrors,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      apiToken: withFieldName('API Token', {
+        required,
+      }),
+    }
   },
   computed: {
     visible: {
@@ -110,39 +112,12 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    secretData () {
-      return {
-        apiToken: this.apiToken,
-      }
-    },
-    validators () {
-      const validators = {
-        apiToken: {
-          required,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
   },
-  watch: {
-    value: function (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
   methods: {
-    reset () {
-      this.v$.$reset()
-
-      this.apiToken = ''
-    },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>

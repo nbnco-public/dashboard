@@ -13,12 +13,12 @@ const pathToRegexp = require('path-to-regexp')
 const {
   COOKIE_HEADER_PAYLOAD,
   COOKIE_TOKEN,
-  COOKIE_SIGNATURE
+  COOKIE_SIGNATURE,
 } = require('../lib/security/constants')
 const jose = require('../lib/security/jose')
-const { sessionSecret } = require('./config').default
+const { sessionSecrets } = require('./config').default
 
-const { sign, encrypt, decode } = jose(sessionSecret)
+const { sign, encrypt, decode } = jose(sessionSecrets)
 
 const iat = 1577836800
 const expiresIn = '50y'
@@ -31,7 +31,7 @@ async function getCookieValue (token) {
   const cookies = {
     [COOKIE_HEADER_PAYLOAD]: join([header, payload], '.'),
     [COOKIE_SIGNATURE]: signature,
-    [COOKIE_TOKEN]: encrypted
+    [COOKIE_TOKEN]: encrypted,
   }
   return reduce(cookies, (accumulator, value, key) => {
     if (accumulator) {
@@ -65,13 +65,13 @@ const auth = {
       },
       get bearer () {
         return bearer
-      }
+      },
     }
   },
   getTokenPayload ({ authorization } = {}) {
     const [, token] = /^Bearer (.*)$/.exec(authorization)
     return decode(token)
-  }
+  },
 }
 
 const mocks = {
@@ -91,19 +91,19 @@ const mocks = {
           verbs: ['get'],
           apiGroups: ['core.gardener.cloud'],
           resources: ['projects'],
-          resourceName: ['foo']
+          resourceName: ['foo'],
         })
         resourceRules.push({
           verbs: ['create'],
           apiGroups: ['core.gardener.cloud'],
-          resources: ['projects']
+          resources: ['projects'],
         })
       } else {
         resourceRules.push({
           verbs: ['get'],
           apiGroups: ['core.gardener.cloud'],
           resources: ['projects'],
-          resourceName: ['foo']
+          resourceName: ['foo'],
         })
       }
       return {
@@ -111,8 +111,8 @@ const mocks = {
         status: {
           resourceRules,
           nonResourceRules,
-          incomplete
-        }
+          incomplete,
+        },
       }
     }
   },
@@ -126,10 +126,11 @@ const mocks = {
       const { id } = auth.getTokenPayload(headers)
       const { resourceAttributes, nonResourceAttributes } = json.spec
       if (resourceAttributes) {
-        const { resource } = resourceAttributes
+        const { resource, namespace } = resourceAttributes
         switch (resource) {
           case 'secrets':
-            allowed = id === 'admin@example.org'
+            allowed = id === 'admin@example.org' ||
+              (id === 'foo@example.org' && namespace === 'garden-foo')
             break
           case 'projects':
             allowed = id === 'projects-viewer@example.org'
@@ -142,8 +143,8 @@ const mocks = {
       return Promise.resolve({
         ...json,
         status: {
-          allowed
-        }
+          allowed,
+        },
       })
     }
   },
@@ -162,14 +163,14 @@ const mocks = {
       return Promise.resolve({
         status: {
           user,
-          authenticated
-        }
+          authenticated,
+        },
       })
     }
-  }
+  },
 }
 
 module.exports = {
   ...auth,
-  mocks
+  mocks,
 }

@@ -15,30 +15,18 @@ import {
 
 import { useLogger } from '@/composables/useLogger'
 
-import {
-  assign,
-  filter,
-  findIndex,
-  get,
-  head,
-  flatMap,
-  matches,
-  matchesProperty,
-  groupBy,
-  orderBy,
-  uniqBy,
-} from '@/lodash'
-
-const eql = ({ projectName, name, state = undefined }) => {
-  const source = { metadata: { projectName } }
-  if (name) {
-    source.metadata.name = name
-  }
-  if (state) {
-    source.metadata.state = state
-  }
-  return matches(source)
-}
+import assign from 'lodash/assign'
+import findIndex from 'lodash/findIndex'
+import get from 'lodash/get'
+import set from 'lodash/set'
+import head from 'lodash/head'
+import matches from 'lodash/matches'
+import matchesProperty from 'lodash/matchesProperty'
+import groupBy from 'lodash/groupBy'
+import orderBy from 'lodash/orderBy'
+import uniqBy from 'lodash/uniqBy'
+import flatMap from 'lodash/flatMap'
+import mapValues from 'lodash/mapValues'
 
 const eqIssue = issue => {
   return matches({ metadata: { number: issue.metadata.number } })
@@ -64,39 +52,43 @@ const putItem = (issueList, newItem) => {
 }
 
 const deleteComment = (issueComments, deletedItem) => {
-  const issueNumber = get(deletedItem, 'metadata.number')
+  const issueNumber = get(deletedItem, ['metadata', 'number'])
 
   // eslint-disable-next-line
   const index = findIndex(commentForIssue(state, issueNumber), matchesProperty('metadata.id', deletedItem.metadata.id))
   if (index !== -1) {
-    issueComments.value[issueNumber].splice(index, 1)
+    get(issueComments.value, [issueNumber]).splice(index, 1)
   }
 }
 
 const commentForIssue = (issueComments, issueNumber) => {
-  if (!issueComments.value[issueNumber]) {
-    issueComments.value[issueNumber] = []
+  if (!get(issueComments.value, [issueNumber])) {
+    set(issueComments.value, [issueNumber], [])
   }
-  return issueComments.value[issueNumber]
+  return get(issueComments.value, [issueNumber])
 }
 
 const putComment = (issueComments, newItem) => {
-  const issueNumber = get(newItem, 'metadata.number')
+  const issueNumber = get(newItem, ['metadata', 'number'])
   const commentsList = commentForIssue(issueComments, issueNumber)
-  const matcher = matchesProperty('metadata.id', newItem.metadata.id)
+  const matcher = matchesProperty(['metadata', 'id'], newItem.metadata.id)
   putToList(commentsList, newItem, 'metadata.updated_at', matcher)
 }
 
 const putToList = (list, newItem, updatedAtKeyPath, matcher, descending = true) => {
   const index = findIndex(list, matcher)
   if (index !== -1) {
-    const item = list[index]
+    const item = list[index] // eslint-disable-line security/detect-object-injection
     if (get(item, updatedAtKeyPath) <= get(newItem, updatedAtKeyPath)) {
       list.splice(index, 1, assign({}, item, newItem))
     }
   } else {
     list.push(newItem)
   }
+}
+
+function issueKey (projectName, name) {
+  return projectName + '/' + name
 }
 
 export const useTicketStore = defineStore('ticket', () => {
@@ -109,16 +101,21 @@ export const useTicketStore = defineStore('ticket', () => {
     return issueList.value
   })
 
+  const issuesMap = computed(() => {
+    return groupBy(issueList.value, item => issueKey(item.metadata.projectName, item.metadata.name))
+  })
+
+  const labelsMap = computed(() => {
+    return mapValues(issuesMap.value, items => uniqBy(flatMap(items, 'data.labels'), 'id'))
+  })
+
   function issues ({ name, projectName }) {
-    return filter(issueList.value, eql({
-      name,
-      projectName,
-      state: 'open',
-    }))
+    const key = issueKey(projectName, name)
+    return get(issuesMap.value, [key], [])
   }
 
   function comments ({ issueNumber }) {
-    return issueComments.value[issueNumber]
+    return get(issueComments.value, [issueNumber])
   }
 
   function latestUpdated ({ name, projectName }) {
@@ -126,7 +123,8 @@ export const useTicketStore = defineStore('ticket', () => {
   }
 
   function labels ({ name, projectName }) {
-    return uniqBy(flatMap(issues({ name, projectName }), 'data.labels'), 'id')
+    const key = issueKey(projectName, name)
+    return get(labelsMap.value, [key], [])
   }
 
   function receiveIssues (issues) {

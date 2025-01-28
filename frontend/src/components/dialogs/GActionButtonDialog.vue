@@ -1,108 +1,62 @@
 <!--
-SPDX-FileCopyrightText: 2023 SAP SE or an SAP affiliate company and Gardener contributors
+SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company and Gardener contributors
 
 SPDX-License-Identifier: Apache-2.0
- -->
+-->
 
 <template>
-  <div class="g-action-button">
-    <template v-if="canPatchShoots">
-      <v-tooltip
-        location="top"
-        max-width="600px"
-        :disabled="disableToolTip"
-      >
-        <template #activator="{ props }">
-          <v-btn
-            v-bind="props"
-            variant="text"
-            :density="isIconButton ? 'comfortable' : 'default'"
-            :disabled="isShootMarkedForDeletion || isShootActionsDisabledForPurpose || disabled"
-            :[iconProp]="icon"
-            :text="buttonText"
-            :color="iconColor"
-            :loading="loading"
-            :width="buttonWidth"
-            :class="{ 'text-none font-weight-regular justify-start': !!buttonText }"
-            @click="showDialog"
-          />
-        </template>
-        {{ actionToolTip }}
-      </v-tooltip>
-      <g-dialog
-        ref="gDialog"
-        v-model:error-message="errorMessage"
-        v-model:detailed-error-message="detailedErrorMessage"
-        :confirm-button-text="confirmButtonText"
-        :confirm-disabled="!valid"
-        :width="width"
-        :max-height="maxHeight"
-        :confirm-value="confirmValue"
-        :disable-confirm-input-focus="disableConfirmInputFocus"
-      >
-        <template #caption>
-          {{ caption }}
-        </template>
-        <template #affectedObjectName>
-          {{ shootName }}
-        </template>
-        <template
-          v-if="$slots.top"
-          #top
-        >
-          <slot name="top" />
-        </template>
-        <template
-          v-if="$slots.card"
-          #card
-        >
-          <slot name="card" />
-        </template>
-        <template
-          v-if="$slots.actionComponent"
-          #message
-        >
-          <slot name="actionComponent" />
-        </template>
-        <template
-          v-if="$slots.errorMessage"
-          #errorMessage
-        >
-          <slot name="errorMessage" />
-        </template>
-        <template
-          v-if="$slots.additionalMessage"
-          #additionalMessage
-        >
-          <slot name="additionalMessage" />
-        </template>
-      </g-dialog>
+  <GGenericActionButtonDialog
+    ref="gDialog"
+    :icon="icon"
+    :color="color"
+    :caption="caption"
+    :tooltip="tooltip"
+    :confirm-button-text="confirmButtonText"
+    :confirm-required="confirmRequired"
+    :width="width"
+    :max-height="maxHeight"
+    :loading="loading"
+    :disabled="isDisabled"
+    :disable-confirm-input-focus="disableConfirmInputFocus"
+    :text="text"
+    :can-perform-action="canPatchShoots"
+    :affected-object-name="shootName"
+    @before-dialog-opened="handleBeforeDialogOpened"
+    @dialog-opened="handleDialogOpened"
+  >
+    <template #header>
+      <slot name="header" />
     </template>
-    <div
-      v-else
-      style="width: 36px"
-    />
-  </div>
+    <template #content>
+      <slot name="content" />
+    </template>
+    <template #footer>
+      <slot name="footer" />
+    </template>
+  </GGenericActionButtonDialog>
 </template>
 
 <script>
-import { mapState } from 'pinia'
+import { storeToRefs } from 'pinia'
 
 import { useAuthzStore } from '@/store/authz'
 
-import GDialog from '@/components/dialogs/GDialog'
+import GGenericActionButtonDialog from '@/components/dialogs/GGenericActionButtonDialog'
 
-import { shootItem } from '@/mixins/shootItem'
+import { useShootItem } from '@/composables/useShootItem'
 
 export default {
   components: {
-    GDialog,
+    GGenericActionButtonDialog,
   },
-  mixins: [shootItem],
   props: {
     icon: {
       type: String,
       default: 'mdi-cog-outline',
+    },
+    color: {
+      type: String,
+      default: 'action-button',
     },
     caption: {
       type: String,
@@ -118,10 +72,6 @@ export default {
       type: Boolean,
       default: false,
     },
-    valid: {
-      type: Boolean,
-      default: true,
-    },
     width: {
       type: String,
     },
@@ -131,83 +81,66 @@ export default {
     },
     loading: {
       type: Boolean,
-    },
-    iconColor: {
-      type: String,
-      default: 'action-button',
+      default: false,
     },
     disabled: {
       type: Boolean,
       default: false,
     },
+    ignoreDeletionStatus: {
+      type: Boolean,
+      default: false,
+    },
     disableConfirmInputFocus: {
       type: Boolean,
+      default: false,
     },
-    buttonText: {
+    text: {
       type: String,
     },
   },
   emits: [
+    'beforeDialogOpened',
     'dialogOpened',
   ],
-  data () {
+  setup (props) {
+    const authzStore = useAuthzStore()
+    const { canPatchShoots } = storeToRefs(authzStore)
+    const { shootName, isShootMarkedForDeletion, isShootActionsDisabledForPurpose } = useShootItem()
+
     return {
-      errorMessage: undefined,
-      detailedErrorMessage: undefined,
+      canPatchShoots,
+      shootName,
+      isShootMarkedForDeletion,
+      isShootActionsDisabledForPurpose,
     }
   },
   computed: {
-    ...mapState(useAuthzStore, [
-      'canPatchShoots',
-    ]),
-    iconProp () {
-      return this.isTextButton ? 'prepend-icon' : 'icon'
-    },
-    confirmValue () {
-      return this.confirmRequired ? this.shootName : undefined
-    },
-    isIconButton () {
-      return !this.buttonText
-    },
-    isTextButton () {
-      return !!this.buttonText
-    },
-    buttonWidth () {
-      return this.buttonText ? '100%' : undefined
-    },
-    actionToolTip () {
-      if (this.tooltip) {
-        return this.tooltip
-      }
-      return this.shootActionToolTip(this.caption)
-    },
-    disableToolTip () {
-      if (this.buttonText === this.actionToolTip) {
-        return true
-      }
-      return false
+    isDisabled () {
+      return (this.isShootMarkedForDeletion && !this.ignoreDeletionStatus) ||
+        this.isShootActionsDisabledForPurpose ||
+        this.disabled
     },
   },
   methods: {
-    showDialog (resetError = true) {
-      if (resetError) {
-        this.errorMessage = undefined
-        this.detailedErrorMessage = undefined
-      }
-      this.$refs.gDialog.showDialog()
-      this.$nextTick(() => {
-        // need to defer event until dialog has been rendered
-        this.$emit('dialogOpened')
-      })
+    handleBeforeDialogOpened () {
+      this.$emit('beforeDialogOpened')
     },
-    async waitForDialogClosed () {
-      return this.$refs.gDialog.confirmWithDialog()
+    handleDialogOpened () {
+      this.$emit('dialogOpened')
+    },
+    showDialog () {
+      if (this.$refs.gDialog) {
+        this.$refs.gDialog.showDialog()
+      }
+    },
+    waitForDialogClosed () {
+      return this.$refs.gDialog.waitForDialogClosed()
     },
     setError ({ errorMessage, detailedErrorMessage }) {
-      this.errorMessage = errorMessage
-      this.detailedErrorMessage = detailedErrorMessage
-
-      this.showDialog(false)
+      if (this.$refs.gDialog) {
+        this.$refs.gDialog.setError({ errorMessage, detailedErrorMessage })
+      }
     },
     hideDialog () {
       if (this.$refs.gDialog) {

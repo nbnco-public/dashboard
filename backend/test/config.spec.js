@@ -27,7 +27,7 @@ describe('config', function () {
 
       it('should return the defaults for the test environment', function () {
         expect(originalGardener.readConfig(path)).toEqual({ port: 1234 })
-        expect(readFileSyncStub).toBeCalledTimes(1)
+        expect(readFileSyncStub).toHaveBeenCalledTimes(1)
         expect(readFileSyncStub.mock.calls[0]).toEqual([path, 'utf8'])
       })
     })
@@ -40,7 +40,7 @@ describe('config', function () {
           isProd: false,
           logLevel: 'debug',
           port: 3030,
-          metricsPort: 9050
+          metricsPort: 9050,
         })
       })
     })
@@ -71,16 +71,23 @@ describe('config', function () {
     describe('#loadConfig', function () {
       const environmentVariables = {
         API_SERVER_URL: 'apiServerUrl',
-        SESSION_SECRET: 'secret'
+        SESSION_SECRET: 'secret',
       }
 
+      let readFileSyncSpy
+
       beforeEach(() => {
+        readFileSyncSpy = jest.spyOn(fs, 'readFileSync')
+      })
+
+      afterEach(() => {
         gardener.readConfig.mockClear()
+        readFileSyncSpy.mockRestore()
       })
 
       it('should return the config in test environment', function () {
         const env = Object.assign({
-          NODE_ENV: 'test'
+          NODE_ENV: 'test',
         }, environmentVariables)
 
         const config = gardener.loadConfig(undefined, { env })
@@ -90,7 +97,7 @@ describe('config', function () {
 
       it('should return the config in production environment', function () {
         const env = Object.assign({
-          NODE_ENV: 'production'
+          NODE_ENV: 'production',
         }, environmentVariables)
 
         const filename = '/etc/gardener/1/config.yaml'
@@ -105,7 +112,7 @@ describe('config', function () {
         const env = Object.assign({
           NODE_ENV: 'production',
           PORT: '3456',
-          LOG_LEVEL: 'error'
+          LOG_LEVEL: 'error',
         }, environmentVariables)
 
         const filename = '/etc/gardener/2/config.yaml'
@@ -118,7 +125,7 @@ describe('config', function () {
 
       it('should return the config in development environment', function () {
         const env = Object.assign({
-          NODE_ENV: 'development'
+          NODE_ENV: 'development',
         }, environmentVariables)
 
         const filename = '/etc/gardener/3/config.yaml'
@@ -133,7 +140,7 @@ describe('config', function () {
         const env = Object.assign({
           OIDC_CLIENT_ID: 'client_id',
           OIDC_CLIENT_SECRET: 'client_secret',
-          OIDC_CA: 'ca'
+          OIDC_CA: 'ca',
         }, environmentVariables)
 
         const filename = '/etc/gardener/4/config.yaml'
@@ -141,6 +148,33 @@ describe('config', function () {
         expect(config.oidc.client_id).toBe('client_id')
         expect(config.oidc.client_secret).toBe('client_secret')
         expect(config.oidc.ca).toBe('ca')
+      })
+
+      it('should return the config with values read from the filesystem', function () {
+        const env = Object.assign({}, environmentVariables)
+
+        const fileMap = {
+          '/etc/gardener-dashboard/secrets/oidc/client_id': 'client_id_from_file',
+          '/etc/gardener-dashboard/secrets/oidc/client_secret': 'client_secret_from_file',
+          '/etc/gardener-dashboard/secrets/github/authentication.appId': '12345',
+          '/etc/gardener-dashboard/secrets/github/authentication.installationId': '67890',
+        }
+
+        readFileSyncSpy.mockImplementation(filePath => {
+          if (filePath in fileMap) {
+            return fileMap[filePath]
+          }
+          throw new Error(filePath + ': not found')
+        })
+
+        const filename = '/etc/gardener/4/config.yaml'
+        const config = gardener.loadConfig(filename, { env })
+
+        expect(config.oidc.issuer).toBe('https://kubernetes:32001')
+        expect(config.oidc.client_id).toBe('client_id_from_file')
+        expect(config.oidc.client_secret).toBe('client_secret_from_file')
+        expect(config.gitHub.authentication.appId).toBe(12345)
+        expect(config.gitHub.authentication.installationId).toBe(67890)
       })
     })
   })

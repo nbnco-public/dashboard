@@ -8,9 +8,15 @@ import { mount } from '@vue/test-utils'
 
 import GMachineType from '@/components/ShootWorkers/GMachineType.vue'
 
-import { map } from '@/lodash'
+import {
+  components as componentsPlugin,
+  utils as utilsPlugin,
+  notify as notifyPlugin,
+} from '@/plugins'
 
-const { createPlugins } = global.fixtures.helper
+import map from 'lodash/map'
+
+const { createVuetifyPlugin } = global.fixtures.helper
 
 describe('components', () => {
   describe('g-machine-type', () => {
@@ -33,7 +39,10 @@ describe('components', () => {
       return mount(GMachineType, {
         global: {
           plugins: [
-            ...createPlugins(),
+            createVuetifyPlugin(),
+            componentsPlugin,
+            utilsPlugin,
+            notifyPlugin,
           ],
         },
         props,
@@ -61,17 +70,17 @@ describe('components', () => {
 
       expect(wrapper.vm.notInList).toBe(false)
       expect(getFilteredItems()).toEqual(['foo', 'bar'])
-      expect(autocompleteWrapper.emitted('update:modelValue')).toBeFalsy()
+      expect(autocompleteWrapper.emitted('update:search')).toBeFalsy()
       expect(wrapper.vm.v$.$invalid).toBe(false)
 
       await setInputValue('256Gi')
       expect(getFilteredItems()).toEqual(['bar'])
-      expect(autocompleteWrapper.emitted('update:modelValue')).toEqual([['256Gi']])
+      expect(autocompleteWrapper.emitted('update:search')).toEqual([['foo'], ['256Gi']])
       expect(wrapper.vm.v$.$invalid).toBe(false)
 
       await setInputValue('bar')
       expect(getFilteredItems()).toEqual(['bar'])
-      expect(autocompleteWrapper.emitted('update:modelValue')).toEqual([['256Gi'], ['bar']])
+      expect(autocompleteWrapper.emitted('update:search')).toEqual([['foo'], ['256Gi'], ['bar']])
       expect(wrapper.vm.v$.$invalid).toBe(false)
 
       await setInputValue(null)

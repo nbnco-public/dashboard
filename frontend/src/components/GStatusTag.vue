@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <div v-if="visible">
     <g-popover
-      v-model="popover"
+      v-model="internalValue"
       :placement="popperPlacement"
       :disabled="!condition.message"
       :toolbar-title="popperTitle"
@@ -18,7 +18,7 @@ SPDX-License-Identifier: Apache-2.0
           v-bind="props"
           ref="tagChipRef"
           :class="{ 'cursor-pointer': condition.message }"
-          :variant="!isError ? 'outlined' : 'flat'"
+          :variant="!isError ? 'tonal' : 'flat'"
           :text-color="textColor"
           size="small"
           :color="color"
@@ -35,7 +35,7 @@ SPDX-License-Identifier: Apache-2.0
             :activator="$refs.tagChipRef"
             location="top"
             max-width="400px"
-            :disabled="popover"
+            :disabled="internalValue"
           >
             <div class="font-weight-bold">
               {{ chipTooltip.title }}
@@ -69,7 +69,7 @@ SPDX-License-Identifier: Apache-2.0
         :error-descriptions="errorDescriptions"
         :last-transition-time="condition.lastTransitionTime"
         :secret-binding-name="secretBindingName"
-        :namespace="namespace"
+        :namespace="shootMetadata.namespace"
       />
     </g-popover>
   </div>
@@ -87,16 +87,17 @@ import {
   objectsFromErrorCodes,
 } from '@/utils/errorCodes'
 
-import {
-  get,
-  isEmpty,
-  filter,
-} from '@/lodash'
+import get from 'lodash/get'
+import isEmpty from 'lodash/isEmpty'
+import filter from 'lodash/filter'
 
 export default {
   components: {
     GShootMessageDetails,
   },
+  inject: [
+    'activePopoverKey',
+  ],
   props: {
     condition: {
       type: Object,
@@ -105,25 +106,34 @@ export default {
     secretBindingName: {
       type: String,
     },
-    namespace: {
-      type: String,
-    },
     popperPlacement: {
       type: String,
     },
     staleShoot: {
       type: Boolean,
     },
-  },
-  data () {
-    return {
-      popover: false,
-    }
+    shootMetadata: {
+      type: Object,
+      default () {
+        return { uid: '' }
+      },
+    },
   },
   computed: {
     ...mapState(useAuthnStore, [
       'isAdmin',
     ]),
+    popoverKey () {
+      return `g-status-tag[${this.condition.type}]:${this.shootMetadata.uid}`
+    },
+    internalValue: {
+      get () {
+        return this.activePopoverKey === this.popoverKey
+      },
+      set (value) {
+        this.activePopoverKey = value ? this.popoverKey : ''
+      },
+    },
     popperTitle () {
       if (this.staleShoot) {
         return 'Last Status'
@@ -231,7 +241,7 @@ export default {
     },
     visible () {
       if (!this.isAdmin) {
-        return !get(this.condition, 'showAdminOnly', false)
+        return !get(this.condition, ['showAdminOnly'], false)
       }
       return true
     },

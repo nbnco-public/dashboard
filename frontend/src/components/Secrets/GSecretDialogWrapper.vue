@@ -9,11 +9,12 @@ SPDX-License-Identifier: Apache-2.0
     :is="componentName"
     v-if="visibleDialog"
     v-model="visibleDialogState"
-    v-bind="{ secret: selectedSecret, vendor: visibleDialog }"
+    v-bind="{ secretBinding: selectedSecretBinding, providerType: visibleDialog }"
   />
 </template>
 
 <script>
+
 import GcpDialog from '@/components/Secrets/GSecretDialogGcp'
 import AwsDialog from '@/components/Secrets/GSecretDialogAws'
 import AzureDialog from '@/components/Secrets/GSecretDialogAzure'
@@ -24,15 +25,14 @@ import VsphereDialog from '@/components/Secrets/GSecretDialogVSphere'
 import CloudflareDialog from '@/components/Secrets/GSecretDialogCloudflare'
 import InfobloxDialog from '@/components/Secrets/GSecretDialogInfoblox'
 import NetlifyDialog from '@/components/Secrets/GSecretDialogNetlify'
+import DDnsDialog from '@/components/Secrets/GSecretDialogDDns'
 import DeleteDialog from '@/components/Secrets/GSecretDialogDelete'
 import HcloudDialog from '@/components/Secrets/GSecretDialogHCloud'
 import GenericDialog from '@/components/Secrets/GSecretDialogGeneric'
 
-import {
-  upperFirst,
-  split,
-  head,
-} from '@/lodash'
+import head from 'lodash/head'
+import split from 'lodash/split'
+import upperFirst from 'lodash/upperFirst'
 
 const components = {
   GcpDialog,
@@ -45,6 +45,7 @@ const components = {
   CloudflareDialog,
   InfobloxDialog,
   NetlifyDialog,
+  DDnsDialog,
   HcloudDialog,
   GenericDialog,
   DeleteDialog,
@@ -53,7 +54,7 @@ const components = {
 export default {
   components,
   props: {
-    selectedSecret: {
+    selectedSecretBinding: {
       type: Object,
       required: false,
     },
@@ -75,6 +76,8 @@ export default {
       switch (this.visibleDialog) {
         case 'google-clouddns':
           return 'GcpDialog'
+        case 'rfc2136':
+          return 'DDnsDialog'
         default: {
           const name = upperFirst(head(split(this.visibleDialog, '-')))
           const componentName = `${name}Dialog`

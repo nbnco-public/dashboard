@@ -4,10 +4,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-import fetch from './fetch'
+import { useAppStore } from '@/store/app'
 
-function request (method, url, data) {
-  return fetch(url, { method, body: data })
+import { fetchWrapper } from './fetch'
+
+async function request (method, url, data) {
+  const response = await fetchWrapper(url, { method, body: data })
+  const { headers } = response
+  if (headers.warning) {
+    const appStore = useAppStore()
+    appStore.setHeaderWarning(headers.warning)
+  }
+  return response
 }
 
 function getResource (url) {
@@ -40,28 +48,28 @@ export function getConfiguration () {
   return getResource('/api/config')
 }
 
-/* CloudProviders Secrets */
-
-export function getCloudProviderSecrets ({ namespace }) {
-  namespace = encodeURIComponent(namespace)
-  return getResource(`/api/namespaces/${namespace}/cloudprovidersecrets`)
+/* Credentials */
+export function invokeCloudProviderCredentialMethod (method, params) {
+  return callResourceMethod('/api/cloudprovidercredentials', {
+    method,
+    params,
+  })
 }
 
-export function updateCloudProviderSecret ({ namespace, name, data }) {
-  namespace = encodeURIComponent(namespace)
-  name = encodeURIComponent(name)
-  return updateResource(`/api/namespaces/${namespace}/cloudprovidersecrets/${name}`, data)
+export function getCloudProviderCredentials (namespace) {
+  return invokeCloudProviderCredentialMethod('list', { bindingNamespace: namespace })
 }
 
-export function createCloudProviderSecret ({ namespace, data }) {
-  namespace = encodeURIComponent(namespace)
-  return createResource(`/api/namespaces/${namespace}/cloudprovidersecrets`, data)
+export function createCloudProviderCredential ({ secretBinding, secret }) {
+  return invokeCloudProviderCredentialMethod('create', { secretBinding, secret })
 }
 
-export function deleteCloudProviderSecret ({ namespace, name }) {
-  namespace = encodeURIComponent(namespace)
-  name = encodeURIComponent(name)
-  return deleteResource(`/api/namespaces/${namespace}/cloudprovidersecrets/${name}`)
+export function updateCloudProviderCredential ({ secretBinding, secret }) {
+  return invokeCloudProviderCredentialMethod('patch', { secretBinding, secret })
+}
+
+export function deleteCloudProviderCredential ({ namespace, name }) {
+  return invokeCloudProviderCredentialMethod('remove', { bindingNamespace: namespace, secretBindingName: name })
 }
 
 /* Tickets */
@@ -79,9 +87,16 @@ export function getIssuesAndComments ({ namespace, name }) {
 
 /* Shoot Clusters */
 
-export function getShoots ({ namespace, labelSelector }) {
-  const search = labelSelector
-    ? '?' + new URLSearchParams({ labelSelector }).toString()
+export function getShoots ({ namespace, labelSelector, useCache }) {
+  const query = {}
+  if (labelSelector) {
+    query.labelSelector = labelSelector
+  }
+  if (useCache) {
+    query.useCache = true
+  }
+  const search = Object.keys(query).length
+    ? '?' + new URLSearchParams(query).toString()
     : ''
   namespace = encodeURIComponent(namespace)
   return getResource(`/api/namespaces/${namespace}/shoots` + search)
@@ -110,6 +125,12 @@ export function replaceShoot ({ namespace, name, data }) {
   return updateResource(`/api/namespaces/${namespace}/shoots/${name}`, data)
 }
 
+export function patchShoot ({ namespace, name, data }) {
+  namespace = encodeURIComponent(namespace)
+  name = encodeURIComponent(name)
+  return patchResource(`/api/namespaces/${namespace}/shoots/${name}`, data)
+}
+
 export function addShootAnnotation ({ namespace, name, data }) {
   namespace = encodeURIComponent(namespace)
   name = encodeURIComponent(name)
@@ -126,12 +147,6 @@ export function updateShootVersion ({ namespace, name, data }) {
   namespace = encodeURIComponent(namespace)
   name = encodeURIComponent(name)
   return updateResource(`/api/namespaces/${namespace}/shoots/${name}/spec/kubernetes/version`, data)
-}
-
-export function updateShootEnableStaticTokenKubeconfig ({ namespace, name, data }) {
-  namespace = encodeURIComponent(namespace)
-  name = encodeURIComponent(name)
-  return updateResource(`/api/namespaces/${namespace}/shoots/${name}/spec/kubernetes/enableStaticTokenKubeconfig`, data)
 }
 
 export function updateShootMaintenance ({ namespace, name, data }) {
@@ -173,7 +188,10 @@ export function updateShootControlPlaneHighAvailability ({ namespace, name, data
 export function updateShootDns ({ namespace, name, data }) {
   namespace = encodeURIComponent(namespace)
   name = encodeURIComponent(name)
-  return updateResource(`/api/namespaces/${namespace}/shoots/${name}/spec/dns`, data)
+  const { dns, extensions, resources } = data.spec
+  return patchResource(`/api/namespaces/${namespace}/shoots/${name}`, {
+    spec: { dns, extensions, resources },
+  })
 }
 
 export async function getShootSchemaDefinition () {
@@ -193,6 +211,12 @@ export function updateShootSeedName ({ namespace, name, data }) {
   return updateResource(`/api/namespaces/${namespace}/shoots/${name}/spec/seedname`, data)
 }
 
+export function createShootAdminKubeconfig ({ namespace, name, data }) {
+  namespace = encodeURIComponent(namespace)
+  name = encodeURIComponent(name)
+  return createResource(`/api/namespaces/${namespace}/shoots/${name}/adminkubeconfig`, data)
+}
+
 /* Cloud Profiles */
 
 export function getCloudProfiles () {
@@ -208,26 +232,26 @@ export function getSeeds () {
 /* Projects */
 
 export function getProjects () {
-  return getResource('/api/namespaces')
+  return getResource('/api/projects')
 }
 
 export function createProject ({ data }) {
-  return createResource('/api/namespaces', data)
+  return createResource('/api/projects', data)
 }
 
-export function patchProject ({ namespace, data }) {
-  namespace = encodeURIComponent(namespace)
-  return patchResource(`/api/namespaces/${namespace}`, data)
+export function patchProject ({ name, data }) {
+  name = encodeURIComponent(name)
+  return patchResource(`/api/projects/${name}`, data)
 }
 
-export function updateProject ({ namespace, data }) {
-  namespace = encodeURIComponent(namespace)
-  return updateResource(`/api/namespaces/${namespace}`, data)
+export function updateProject ({ name, data }) {
+  name = encodeURIComponent(name)
+  return updateResource(`/api/projects/${name}`, data)
 }
 
-export function deleteProject ({ namespace }) {
-  namespace = encodeURIComponent(namespace)
-  return deleteResource(`/api/namespaces/${namespace}`)
+export function deleteProject ({ name }) {
+  name = encodeURIComponent(name)
+  return deleteResource(`/api/projects/${name}`)
 }
 
 /* Members */
@@ -278,10 +302,6 @@ export function getSubjectRules (options) {
   return callResourceMethod('/api/user/subjectrules', {
     namespace,
   })
-}
-
-export function getToken () {
-  return getResource('/api/user/token')
 }
 
 export function getKubeconfigData () {
@@ -376,10 +396,10 @@ export function getResourceQuotas ({ namespace }) {
 
 export default {
   getConfiguration,
-  getCloudProviderSecrets,
-  updateCloudProviderSecret,
-  createCloudProviderSecret,
-  deleteCloudProviderSecret,
+  getCloudProviderCredentials,
+  createCloudProviderCredential,
+  updateCloudProviderCredential,
+  deleteCloudProviderCredential,
   getIssues,
   getIssuesAndComments,
   getShoots,
@@ -387,10 +407,10 @@ export default {
   createShoot,
   deleteShoot,
   replaceShoot,
+  patchShoot,
   addShootAnnotation,
   getShootInfo,
   updateShootVersion,
-  updateShootEnableStaticTokenKubeconfig,
   updateShootMaintenance,
   updateShootHibernationSchedules,
   updateShootHibernation,
@@ -400,6 +420,7 @@ export default {
   getShootSchemaDefinition,
   updateShootPurpose,
   updateShootSeedName,
+  createShootAdminKubeconfig,
   getCloudProfiles,
   getSeeds,
   getProjects,
@@ -415,7 +436,6 @@ export default {
   resetServiceAccount,
   createTokenReview,
   getSubjectRules,
-  getToken,
   getKubeconfigData,
   getInfo,
   createTerminal,

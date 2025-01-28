@@ -11,8 +11,8 @@ SPDX-License-Identifier: Apache-2.0
         :code="routerErrorCode"
         :text="routerErrorText"
         :message="routerErrorMessage"
-        button-text="Reload this page"
-        @click="reload"
+        :button-text="buttonText"
+        @click="onClick"
       />
     </v-main>
     <template v-else>
@@ -34,6 +34,7 @@ import {
 import { onBeforeRouteUpdate } from 'vue-router'
 
 import { useAppStore } from '@/store/app'
+import { useAuthnStore } from '@/store/authn'
 
 import GError from '@/components/GError.vue'
 import GLoading from '@/components/GLoading.vue'
@@ -44,10 +45,11 @@ import GNotify from '@/components/GNotify.vue'
 
 import { useLogger } from '@/composables/useLogger'
 
-import { get } from '@/lodash'
+import get from 'lodash/get'
 
 const logger = useLogger()
 const appStore = useAppStore()
+const authnStore = useAuthnStore()
 
 // refs
 const app = ref(null)
@@ -60,17 +62,23 @@ const hasRouterError = computed(() => {
 
 const routerErrorCode = computed(() => {
   const err = appStore.routerError
-  return get(err, 'response.data.code', get(err, 'status', 500))
+  return get(err, ['response', 'data', 'code'], get(err, ['status'], 500))
 })
 
 const routerErrorText = computed(() => {
   const err = appStore.routerError
-  return get(err, 'response.data.reason', get(err, 'reason', 'Unexpected error :('))
+  return get(err, ['response', 'data', 'reason'], get(err, ['reason'], 'Unexpected error :('))
 })
 
 const routerErrorMessage = computed(() => {
   const err = appStore.routerError
-  return get(err, 'response.data.message', get(err, 'message'))
+  return get(err, ['response', 'data', 'message'], get(err, ['message']))
+})
+
+const buttonText = computed(() => {
+  return routerErrorCode.value === 401
+    ? 'Reset Session'
+    : 'Reload this page'
 })
 
 // methods
@@ -80,8 +88,12 @@ function setElementOverflowY (element, value) {
   }
 }
 
-function reload () {
-  window.location.reload()
+function onClick () {
+  if (routerErrorCode.value === 401) {
+    authnStore.signout()
+  } else {
+    window.location.reload()
+  }
 }
 
 // hooks

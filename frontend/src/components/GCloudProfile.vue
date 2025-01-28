@@ -8,16 +8,15 @@ SPDX-License-Identifier: Apache-2.0
   <div>
     <template v-if="createMode">
       <v-select
+        v-model="v$.internalValue.$model"
         :items="cloudProfiles"
-        :model-value="modelValue"
         item-value="metadata.name"
         item-title="metadata.displayName"
         label="Cloud Profile"
-        :error-messages="getErrorMessages('modelValue')"
+        :error-messages="getErrorMessages(v$.internalValue)"
         color="primary"
         variant="underlined"
-        @update:model-value="onInput"
-        @blur="v$.modelValue.$touch()"
+        @blur="v$.internalValue.$touch()"
       />
     </template>
     <template v-else>
@@ -34,13 +33,8 @@ SPDX-License-Identifier: Apache-2.0
 import { useVuelidate } from '@vuelidate/core'
 import { required } from '@vuelidate/validators'
 
-import { getValidationErrors } from '@/utils'
-
-const validationErrors = {
-  modelValue: {
-    required: 'You can\'t leave this empty.',
-  },
-}
+import { getErrorMessages } from '@/utils'
+import { withFieldName } from '@/utils/validators'
 
 export default {
   props: {
@@ -64,31 +58,25 @@ export default {
       v$: useVuelidate(),
     }
   },
-  data () {
+  validations () {
     return {
-      validationErrors,
+      internalValue: withFieldName('Cloud Profile', {
+        required,
+      }),
     }
   },
-  validations () {
-    return this.validators
-  },
   computed: {
-    validators () {
-      return {
-        modelValue: {
-          required,
-        },
-      }
+    internalValue: {
+      get () {
+        return this.modelValue
+      },
+      set (value) {
+        this.$emit('update:modelValue', value)
+      },
     },
   },
   methods: {
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
-    onInput (modelValue) {
-      this.v$.modelValue.$touch()
-      this.$emit('update:modelValue', modelValue)
-    },
+    getErrorMessages,
   },
 }
 </script>

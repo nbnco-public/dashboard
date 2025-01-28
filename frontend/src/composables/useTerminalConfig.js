@@ -8,17 +8,17 @@ import {
   computed,
   reactive,
   watch,
+  inject,
+  provide,
 } from 'vue'
 
 import { useAuthnStore } from '@/store/authn'
 
-import {
-  get,
-  head,
-  some,
-} from '@/lodash'
+import get from 'lodash/get'
+import head from 'lodash/head'
+import some from 'lodash/some'
 
-export const useTerminalConfig = () => {
+export function createTerminalConfigComposable () {
   const authnStore = useAuthnStore()
 
   function updateState (options = {}) {
@@ -39,7 +39,7 @@ export const useTerminalConfig = () => {
     state.node = defaultNode
     if (!defaultNode) {
       state.node = authnStore.isAdmin
-        ? get(head(nodes), 'data.kubernetesHostname')
+        ? get(head(nodes), ['data', 'kubernetesHostname'])
         : autoSelectNodeItem.data.kubernetesHostname
     }
 
@@ -101,4 +101,14 @@ export const useTerminalConfig = () => {
     config,
     updateState,
   }
+}
+
+export function useTerminalConfig () {
+  return inject('terminal-config', null)
+}
+
+export function useProvideTerminalConfig () {
+  const terminalConfigComposable = createTerminalConfigComposable()
+  provide('terminal-config', terminalConfigComposable)
+  return terminalConfigComposable
 }

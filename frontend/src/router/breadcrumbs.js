@@ -1,13 +1,11 @@
 //
-// SPDX-FileCopyrightText: 2023 SAP SE or an SAP affiliate company and Gardener contributors
+// SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company and Gardener contributors
 //
 // SPDX-License-Identifier: Apache-2.0
 //
 
-import {
-  get,
-  pick,
-} from '@/lodash'
+import get from 'lodash/get'
+import pick from 'lodash/pick'
 
 export function homeBreadcrumbs () {
   return [
@@ -118,26 +116,7 @@ export function shootItemBreadcrumbs ({ params }) {
     },
     {
       get title () {
-        return get(params, 'name')
-      },
-    },
-  ]
-}
-
-export function secretItemBreadcrumbs ({ params }) {
-  return [
-    {
-      title: 'Secrets',
-      get to () {
-        return {
-          name: 'Secrets',
-          params: pick(params, ['namespace']),
-        }
-      },
-    },
-    {
-      get title () {
-        return get(params, 'name')
+        return get(params, ['name'])
       },
     },
   ]
@@ -156,7 +135,7 @@ export function shootItemTerminalBreadcrumbs ({ params }) {
     },
     {
       get title () {
-        return get(params, 'name')
+        return get(params, ['name'])
       },
       get to () {
         return {

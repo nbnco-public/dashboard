@@ -44,16 +44,12 @@ SPDX-License-Identifier: Apache-2.0
         </v-tabs>
         <v-window
           v-model="loginType"
-          :style="{
-            height: `${windowHeight}px`,
-          }"
+          :style="windowItemStyle"
         >
           <v-window-item
             value="oidc"
             class="pa-3"
-            style="{
-              height: `${windowHeight}px`,
-            }"
+            style="windowItemStyle"
           >
             <!-- eslint-disable vue/no-v-html -->
             <div
@@ -65,9 +61,7 @@ SPDX-License-Identifier: Apache-2.0
           <v-window-item
             value="token"
             class="pa-3"
-            style="{
-              height: `${windowHeight}px`,
-            }"
+            style="windowItemStyle"
           >
             <!-- eslint-disable vue/no-v-html -->
             <div
@@ -75,10 +69,7 @@ SPDX-License-Identifier: Apache-2.0
               v-html="tokenLoginText"
             />
             <!-- eslint-enable vue/no-v-html -->
-            <v-form
-              autocomplete="off"
-              class="d-flex justify-center mt-3"
-            >
+            <div class="d-flex justify-center mt-3">
               <v-text-field
                 ref="tokenField"
                 v-model="token"
@@ -96,8 +87,9 @@ SPDX-License-Identifier: Apache-2.0
                   maxWidth: `${teaserWidth - 96}px`,
                 }"
                 @click:append-inner="showToken = !showToken"
+                @keydown.enter="handleLogin"
               />
-            </v-form>
+            </div>
           </v-window-item>
         </v-window>
         <div
@@ -107,7 +99,8 @@ SPDX-License-Identifier: Apache-2.0
           }"
         >
           <v-btn
-            variant="elevated"
+            ref="loginButton"
+            variant="tonal"
             color="primary"
             @click="handleLogin"
           >
@@ -148,7 +141,7 @@ import GNotify from '@/components/GNotify.vue'
 
 import { setDelayedInputFocus } from '@/utils'
 
-import { get } from '@/lodash'
+import get from 'lodash/get'
 
 export default {
   components: {
@@ -172,7 +165,7 @@ export default {
     const localStorageStore = useLocalStorageStore()
     await loginStore.fetchConfig()
     if (!err && loginStore.loginType === 'oidc' && localStorageStore.autoLogin) {
-      const redirectPath = get(to.query, 'redirectPath', '/')
+      const redirectPath = get(to.query, ['redirectPath'], '/')
       const authnStore = useAuthnStore()
       authnStore.signinWithOidc(redirectPath)
       return next(false)
@@ -181,16 +174,25 @@ export default {
     next(vm => {
       if (err) {
         if (err.message !== 'NoAutoLogin') {
-          vm.setError(err)
+          vm.error = err
         }
         vm.$router.replace('/login')
       }
     })
   },
+  beforeRouteUpdate (to, from, next) {
+    if (this.error) {
+      const err = this.error
+      this.error = null
+      this.setError(err)
+    }
+    next()
+  },
   data () {
     return {
       showToken: false,
       token: '',
+      error: null,
     }
   },
   computed: {
@@ -232,6 +234,11 @@ export default {
     windowItemHeight () {
       return this.windowHeight - 24
     },
+    windowItemStyle () {
+      return {
+        height: `${this.windowHeight}px`,
+      }
+    },
     appHeight () {
       return this.totalTeaserHeight + 2 * this.footerHeight
     },
@@ -247,7 +254,7 @@ export default {
       }
     },
     redirectPath () {
-      return get(this.$route.query, 'redirectPath', '/')
+      return get(this.$route.query, ['redirectPath'], '/')
     },
     oidcLoginText () {
       const value = this.branding.oidcLoginText ?? 'Press Login to be redirected to the configured\nOpenID Connect Provider.'
@@ -259,10 +266,19 @@ export default {
     },
   },
   watch: {
-    loginType (value) {
-      if (value === 'token') {
-        setDelayedInputFocus(this, 'tokenField')
-      }
+    loginType: {
+      handler (value) {
+        if (value === 'token') {
+          setDelayedInputFocus(this, 'tokenField')
+        }
+        if (value === 'oidc') {
+          setDelayedInputFocus(this, 'loginButton.$el', {
+            delay: 0,
+            noSelect: true,
+          })
+        }
+      },
+      immediate: true,
     },
   },
   methods: {
@@ -301,7 +317,7 @@ export default {
       } catch (err) {
         this.setError({
           title: `${this.getLoginTypeTitle('oidc')} Login Error`,
-          message: err.message,
+          text: err.message,
         })
       }
     },
@@ -318,7 +334,7 @@ export default {
       } catch (err) {
         this.setError({
           title: `${this.getLoginTypeTitle('token')} Login Error`,
-          message: err.message,
+          text: err.message,
         })
       }
     },
@@ -333,4 +349,5 @@ export default {
   .v-application {
     background: linear-gradient(to bottom, $bg-top 0%, $bg-top 50%, $bg-bottom 50%, $bg-bottom 100%) !important;
   }
+
 </style>

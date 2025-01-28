@@ -65,7 +65,7 @@ SPDX-License-Identifier: Apache-2.0
         :color="color"
         :loading="loading"
         :messages="messages"
-        :error-messages="v$.internalValue.$errors.map(e => e.$message)"
+        :error-messages="getErrorMessages(v$.internalValue)"
         class="g-field"
         @input="v$.internalValue.$touch"
         @blur="v$.internalValue.$touch"
@@ -100,7 +100,10 @@ SPDX-License-Identifier: Apache-2.0
 <script>
 import { useVuelidate } from '@vuelidate/core'
 
-import { setDelayedInputFocus } from '@/utils'
+import {
+  setDelayedInputFocus,
+  getErrorMessages,
+} from '@/utils'
 
 import GErrorMessage from './GErrorMessage.vue'
 
@@ -111,7 +114,7 @@ export default {
   props: {
     modelValue: {
       type: String,
-      required: true,
+      default: '',
     },
     save: {
       type: Function,
@@ -253,12 +256,14 @@ export default {
       this.clearMessages()
       this.v$.$reset()
     },
+    getErrorMessages,
   },
 }
 </script>
 
 <style lang="scss" scoped>
-  @import 'vuetify/settings';
+  @use 'vuetify/settings' as vuetify;
+  @use 'sass:map';
 
   .g-field {
     :deep(.v-input__details .v-messages) {
@@ -275,7 +280,7 @@ export default {
     }
   }
 
-  $green-base: map-get($green, 'base');
+  $green-base: map.get(vuetify.$green, 'base');
 
   .content {
     animation-duration: 900ms;

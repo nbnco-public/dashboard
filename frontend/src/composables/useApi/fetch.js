@@ -46,6 +46,11 @@ export function fetchWrapper (url, { method = 'GET', cache = 'no-cache', headers
     }
   }
   promise = promise.then(args => {
+    try {
+      new URL(args[0]) // eslint-disable-line no-new
+    } catch (err) {
+      args[0] = new URL(args[0], window.location.origin)
+    }
     const request = new Request(...args)
     return fetch(request).then(fulfilledFn(request), rejectedFn(request))
   })
@@ -87,10 +92,10 @@ function fulfilledFn (request) {
     if (!contentType) {
       promise = Promise.resolve(response)
     } else {
-      const method = contentType.startsWith('application/json')
-        ? 'json'
-        : 'text'
-      promise = response[method]().then(data => {
+      promise = contentType.startsWith('application/json')
+        ? response.json()
+        : response.text()
+      promise = promise.then(data => {
         Object.defineProperty(response, 'data', {
           value: data,
         })
@@ -135,5 +140,3 @@ export function createError (status, message, properties = {}) {
   }
   return err
 }
-
-export default fetchWrapper

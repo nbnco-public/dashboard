@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 <template>
   <g-popover
+    v-model="internalValue"
     :toolbar-title="workerGroup.name"
     placement="bottom"
   >
@@ -13,15 +14,21 @@ SPDX-License-Identifier: Apache-2.0
       <v-chip
         v-bind="props"
         size="small"
-        class="cursor-pointer my-0 ml-0"
-        variant="outlined"
-        color="primary"
+        class="cursor-pointer"
+        variant="tonal"
+        :color="chipColor"
       >
         <g-vendor-icon
-          :icon="machineImageIcon"
+          :icon="machineImage.icon"
           :size="20"
         />
-        <span class="px-1">{{ workerGroup.name }}</span>
+        <span class="pl-1">{{ workerGroup.name }}</span>
+        <v-tooltip
+          location="top"
+          :disabled="!machineImage.isDeprecated"
+          text="Machine image version is deprecated"
+          activator="parent"
+        />
       </v-chip>
     </template>
     <v-tabs
@@ -33,26 +40,25 @@ SPDX-License-Identifier: Apache-2.0
         value="overview"
         class="text-caption text-medium-emphasis"
       >
-        Overview
+        OVERVIEW
       </v-tab>
       <v-tab
         value="yaml"
         class="text-caption text-medium-emphasis"
       >
-        Yaml
+        YAML
       </v-tab>
     </v-tabs>
     <v-card-text>
       <v-window
         v-model="tab"
-        min-width="600"
+        class="group-window"
       >
         <v-window-item value="overview">
-          <v-container class="pa-2">
+          <v-container class="pa-0">
             <v-row dense>
               <v-col cols="6">
                 <v-card
-                  variant="outlined"
                   class="border"
                 >
                   <v-toolbar
@@ -97,8 +103,8 @@ SPDX-License-Identifier: Apache-2.0
                           :key="zone"
                           size="small"
                           label
-                          variant="outlined"
-                          class="px-1 mr-1"
+                          variant="tonal"
+                          class="ma-1"
                         >
                           {{ zone }}
                         </v-chip>
@@ -127,7 +133,6 @@ SPDX-License-Identifier: Apache-2.0
                   </v-card-text>
                 </v-card>
                 <v-card
-                  variant="outlined"
                   class="border mt-2"
                 >
                   <v-toolbar
@@ -172,7 +177,6 @@ SPDX-License-Identifier: Apache-2.0
               </v-col>
               <v-col cols="6">
                 <v-card
-                  variant="outlined"
                   class="border"
                 >
                   <v-toolbar
@@ -217,23 +221,44 @@ SPDX-License-Identifier: Apache-2.0
                           mdi-alert
                         </v-icon>Image not found in cloud profile
                       </v-col>
-                      <v-col
-                        v-else-if="machineImage.expirationDate"
-                        cols="12"
-                      >
-                        <v-icon
-                          size="small"
-                          class="mr-1"
-                          color="warning"
+                      <template v-else>
+                        <v-col
+                          cols="12"
                         >
-                          mdi-alert
-                        </v-icon>Image expires on {{ machineImage.expirationDateString }}
-                      </v-col>
+                          <legend class="text-caption text-medium-emphasis">
+                            Classification
+                          </legend>
+                          <v-icon
+                            size="x-small"
+                            :color="classificationColor"
+                            :icon="classificationIcon"
+                          />
+                          {{ machineImage.classification }}
+                        </v-col>
+                        <v-col
+                          v-if="machineImage.expirationDate"
+                          cols="12"
+                        >
+                          <v-icon
+                            v-if="machineImage.isExpirationWarning"
+                            size="x-small"
+                            class="mr-1"
+                            color="warning"
+                          >
+                            mdi-alert
+                          </v-icon>
+                          Image expires
+                          <g-time-string
+                            :date-time="machineImage.expirationDate"
+                            mode="future"
+                            date-tooltip
+                          />
+                        </v-col>
+                      </template>
                     </v-row>
                   </v-card-text>
                 </v-card>
                 <v-card
-                  variant="outlined"
                   class="border mt-2"
                 >
                   <v-toolbar
@@ -282,7 +307,6 @@ SPDX-License-Identifier: Apache-2.0
                   </v-card-text>
                 </v-card>
                 <v-card
-                  variant="outlined"
                   class="border mt-2"
                 >
                   <v-toolbar
@@ -321,7 +345,7 @@ SPDX-License-Identifier: Apache-2.0
                           :key="containerRuntime.type"
                           size="small"
                           label
-                          variant="outlined"
+                          variant="tonal"
                           class="px-1 mr-1"
                         >
                           {{ containerRuntime.type }}
@@ -338,7 +362,7 @@ SPDX-License-Identifier: Apache-2.0
           <g-code-block
             lang="yaml"
             :content="workerGroupYaml"
-            style="min-width: 480px"
+            max-height="100%"
           />
         </v-window-item>
       </v-window>
@@ -347,57 +371,78 @@ SPDX-License-Identifier: Apache-2.0
 </template>
 
 <script>
+import { ref } from 'vue'
 import { mapActions } from 'pinia'
+import yaml from 'js-yaml'
 
 import { useCloudProfileStore } from '@/store/cloudProfile'
 
-import GVendorIcon from '@/components/GVendorIcon'
 import GCodeBlock from '@/components/GCodeBlock'
+import GVendorIcon from '@/components/GVendorIcon'
 
-import {
-  find,
-  get,
-} from '@/lodash'
+import { useShootItem } from '@/composables/useShootItem'
+
+import get from 'lodash/get'
+import find from 'lodash/find'
 
 export default {
   components: {
-    GVendorIcon,
     GCodeBlock,
+    GVendorIcon,
   },
-  inject: ['yaml'],
+  inject: [
+    'mergeProps',
+    'activePopoverKey',
+  ],
   props: {
-    modelValue: {
-      type: [String, Number],
-    },
     workerGroup: {
       type: Object,
     },
-    cloudProfileName: {
-      type: String,
-    },
   },
-  emits: [
-    'update:modelValue',
-  ],
+  setup () {
+    const {
+      shootMetadata,
+      shootCloudProfileName,
+    } = useShootItem()
+
+    const tab = ref('overview')
+
+    return {
+      tab,
+      shootMetadata,
+      shootCloudProfileName,
+    }
+  },
   data () {
     return {
       workerGroupYaml: undefined,
     }
   },
   computed: {
+    popoverKey () {
+      return `g-worker-group[${this.workerGroup.name}]:${this.shootMetadata.uid}`
+    },
+    internalValue: {
+      get () {
+        return this.activePopoverKey === this.popoverKey
+      },
+      set (value) {
+        this.activePopoverKey = value ? this.popoverKey : ''
+      },
+    },
     machineType () {
-      const machineTypes = this.machineTypesByCloudProfileName({ cloudProfileName: this.cloudProfileName })
-      const type = get(this.workerGroup, 'machine.type')
+      const machineTypes = this.machineTypesByCloudProfileName(this.shootCloudProfileName)
+      const type = get(this.workerGroup, ['machine', 'type'])
       return find(machineTypes, ['name', type])
     },
     volumeType () {
-      const volumeTypes = this.volumeTypesByCloudProfileName({ cloudProfileName: this.cloudProfileName })
-      const type = get(this.workerGroup, 'volume.type')
+      const volumeTypes = this.volumeTypesByCloudProfileName(this.shootCloudProfileName)
+      const type = get(this.workerGroup, ['volume', 'type'])
       return find(volumeTypes, ['name', type])
     },
     volumeCardData () {
-      const storage = get(this.machineType, 'storage', {})
-      const volume = get(this.workerGroup, 'volume', {})
+      const storage = get(this.machineType, ['storage'], {})
+      const volume = get(this.workerGroup, ['volume'], {})
 
       // all infrastructures support volume sizes, but for some they are optional
       // if no size is defined on the worker itself, check if machine storage defines a default size
@@ -423,23 +468,30 @@ export default {
       return {}
     },
     machineImage () {
-      const machineImages = this.machineImagesByCloudProfileName(this.cloudProfileName)
-      const { name, version } = get(this.workerGroup, 'machine.image', {})
-      return find(machineImages, { name, version })
+      const machineImages = this.machineImagesByCloudProfileName(this.shootCloudProfileName)
+      const { name, version } = get(this.workerGroup, ['machine', 'image'], {})
+      return find(machineImages, { name, version }) ?? {}
     },
     machineCri () {
       return this.workerGroup.cri ?? {}
     },
-    machineImageIcon () {
-      return get(this.machineImage, 'icon')
+    classificationColor () {
+      if (this.machineImage.isDeprecated) {
+        return 'warning'
+      }
+      if (this.machineImage.isPreview) {
+        return 'info'
+      }
+      return 'primary'
     },
-    tab: {
-      get () {
-        return this.modelValue
-      },
-      set (modelValue) {
-        this.$emit('update:modelValue', modelValue)
-      },
+    classificationIcon () {
+      if (this.machineImage.isDeprecated || this.machineImage.isPreview) {
+        return 'mdi-alert-circle-outline'
+      }
+      return 'mdi-information-outline'
+    },
+    chipColor () {
+      return this.machineImage.isDeprecated ? 'warning' : 'primary'
     },
   },
   created () {
@@ -451,8 +503,8 @@ export default {
       'volumeTypesByCloudProfileName',
       'machineImagesByCloudProfileName',
     ]),
-    async updateWorkerGroupYaml (value) {
-      this.workerGroupYaml = await this.yaml.dump(value)
+    updateWorkerGroupYaml (value) {
+      this.workerGroupYaml = yaml.dump(value)
     },
   },
 }
@@ -461,5 +513,9 @@ export default {
 <style>
   .border {
     border-color: rgba(var(--v-border-color), var(--v-border-opacity)) !important;
+  }
+
+  .group-window {
+    width: 450px;
   }
 </style>

@@ -12,20 +12,40 @@ SPDX-License-Identifier: Apache-2.0
 
 <script>
 import {
-  mapState,
-  mapActions,
-} from 'pinia'
+  ref,
+  computed,
+  provide,
+  watch,
+  onBeforeMount,
+  onMounted,
+  onBeforeUnmount,
+  toRef,
+} from 'vue'
+import {
+  useRoute,
+  onBeforeRouteLeave,
+  onBeforeRouteUpdate,
+} from 'vue-router'
 
 import { useAuthzStore } from '@/store/authz'
-import { useSecretStore } from '@/store/secret'
-import { useShootStore } from '@/store/shoot'
-import { useTerminalStore } from '@/store/terminal'
 import { useAuthnStore } from '@/store/authn'
+import { useConfigStore } from '@/store/config'
+import { useCredentialStore } from '@/store/credential'
+import { useShootStore } from '@/store/shoot'
+import { useCloudProfileStore } from '@/store/cloudProfile'
+import { useProjectStore } from '@/store/project'
+import { useSeedStore } from '@/store/seed'
+import { useGardenerExtensionStore } from '@/store/gardenerExtension'
+import { useTerminalStore } from '@/store/terminal'
 
 import GShootItemLoading from '@/views/GShootItemLoading.vue'
 import GShootItemError from '@/views/GShootItemError.vue'
 
-import { isEqual } from '@/lodash'
+import { useProvideProjectItem } from '@/composables/useProjectItem'
+import { useProvideShootItem } from '@/composables/useShootItem'
+import { useProvideShootHelper } from '@/composables/useShootHelper'
+
+import isEqual from 'lodash/isEqual'
 
 function isLoadRequired (route, to) {
   return route.name !== to.name || !isEqual(route.params, to.params)
@@ -43,51 +63,44 @@ export default {
       }
     })
   },
-  async beforeRouteUpdate (to, from) {
-    if (isLoadRequired(this.$route, to)) {
-      await this.load(to)
-    }
-  },
-  beforeRouteLeave (to, from) {
-    this.unsubscribe()
-  },
-  data () {
-    return {
-      error: null,
-      readyState: 'initial',
-      unsubscribeShootStore: () => {},
-    }
-  },
-  computed: {
-    ...mapState(useShootStore, [
-      'subscriptionState',
-      'subscriptionError',
-    ]),
-    ...mapState(useAuthzStore, [
-      'canGetSecrets',
-      'canUseProjectTerminalShortcuts',
-    ]),
-    ...mapState(useAuthnStore, [
-      'isAdmin',
-    ]),
-    component () {
-      if (this.error) {
+  setup () {
+    const route = useRoute()
+    const authnStore = useAuthnStore()
+    const authzStore = useAuthzStore()
+    const configStore = useConfigStore()
+    const shootStore = useShootStore()
+    const credentialStore = useCredentialStore()
+    const terminalStore = useTerminalStore()
+    const cloudProfileStore = useCloudProfileStore()
+    const projectStore = useProjectStore()
+    const seedStore = useSeedStore()
+    const gardenerExtensionStore = useGardenerExtensionStore()
+
+    const activePopoverKey = ref('')
+    const error = ref(null)
+    const readyState = ref('initial')
+
+    const shootItem = computed(() => shootStore.shootByNamespaceAndName(route.params))
+
+    const component = computed(() => {
+      if (error.value) {
         return 'g-shoot-item-error'
-      } else if (this.readyState === 'loading') {
+      } else if (readyState.value === 'loading') {
         return 'g-shoot-item-loading'
-      } else if (this.readyState === 'loaded') {
+      } else if (readyState.value === 'loaded') {
         return 'router-view'
       }
       return 'div'
-    },
-    componentProperties () {
-      switch (this.component) {
+    })
+
+    const componentProperties = computed(() => {
+      switch (component.value) {
         case 'g-shoot-item-error': {
           const {
             code = 500,
             reason = 'Oops, something went wrong',
             message = 'An unexpected error occurred. Please try again later',
-          } = this.error
+          } = error.value
           return {
             code,
             text: reason,
@@ -95,10 +108,9 @@ export default {
           }
         }
         case 'router-view': {
-          const { name, path } = this.$route
           return {
-            key: name === 'ShootItemTerminal'
-              ? path
+            key: route.name === 'ShootItemTerminal'
+              ? route.path
               : undefined,
           }
         }
@@ -106,92 +118,38 @@ export default {
           return {}
         }
       }
-    },
-  },
-  watch: {
-    '$route' () {
-      this.readyState = 'loaded'
-    },
-  },
-  beforeMount () {
-    this.readyState = 'initial'
-  },
-  async mounted () {
-    const shootStore = useShootStore()
-    this.unsubscribeShootStore = shootStore.$onAction(({
-      name,
-      args,
-      after,
-    }) => {
-      switch (name) {
-        case 'handleEvent': {
-          after(() => this.handleShootEvent(...args))
-          break
-        }
-      }
     })
-    await this.load(this.$route)
-    this.readyState = 'loaded'
-  },
-  beforeUnmount () {
-    this.readyState = 'initial'
-    this.unsubscribeShootStore()
-  },
-  methods: {
-    ...mapActions(useShootStore, [
-      'subscribe',
-      'unsubscribe',
-      'shootByNamespaceAndName',
-    ]),
-    ...mapActions(useSecretStore, [
-      'fetchSecrets',
-    ]),
-    ...mapActions(useTerminalStore, [
-      'ensureProjectTerminalShortcutsLoaded',
-    ]),
-    handleShootEvent ({ type, object }) {
-      const metadata = object.metadata
-      const routeParams = this.$route.params ?? {}
-      if (metadata.namespace !== routeParams.namespace || metadata.name !== routeParams.name) {
-        return
-      }
-      if (type === 'DELETED') {
-        this.error = Object.assign(new Error('The cluster you are looking for is no longer available'), {
-          code: 410,
-          reason: 'Cluster is gone',
-        })
-      } else if (type === 'ADDED' && [404, 410].includes(this.error?.code)) {
-        this.error = null
-      }
-    },
-    async load (route) {
-      this.error = null
-      this.readyState = 'loading'
-      const routeName = route.name
-      const routeParams = route.params
+
+    async function load (to) {
+      error.value = null
+      readyState.value = 'loading'
+      const routeName = to.name
+      const routeParams = to.params
       try {
         const promises = [
-          this.subscribe(routeParams),
+          shootStore.subscribe(routeParams),
         ]
-        if (['ShootItem', 'ShootItemHibernationSettings'].includes(routeName) && this.canGetSecrets) {
-          promises.push(this.fetchSecrets()) // Required for purpose configuration
+        if (['ShootItem', 'ShootItemHibernationSettings'].includes(routeName) && authzStore.canGetSecrets) {
+          promises.push(credentialStore.fetchCredentials()) // Required for purpose configuration
         }
-        if (['ShootItem', 'ShootItemHibernationSettings', 'ShootItemTerminal'].includes(routeName) && this.canUseProjectTerminalShortcuts) {
-          promises.push(this.ensureProjectTerminalShortcutsLoaded())
+        if (['ShootItem', 'ShootItemHibernationSettings', 'ShootItemTerminal'].includes(routeName) && authzStore.canUseProjectTerminalShortcuts) {
+          promises.push(terminalStore.ensureProjectTerminalShortcutsLoaded())
         }
         await Promise.all(promises)
 
-        const shootItem = this.shootByNamespaceAndName(routeParams)
-        const shootWorkerGroups = shootItem?.spec?.provider?.workers ?? []
-        const hasShootWorkerGroups = shootWorkerGroups.length > 0
-        if (routeName === 'ShootItemTerminal' && !this.isAdmin && !hasShootWorkerGroups) {
-          this.error = Object.assign(Error('Shoot has no workers to schedule a terminal pod'), {
+        if (routeName === 'ShootItemTerminal' && !authnStore.isAdmin & hasShootWorkerGroups.value) {
+          error.value = Object.assign(Error('Shoot has no workers to schedule a terminal pod'), {
             code: 404,
             reason: 'Terminal not available',
           })
         }
       } catch (err) {
-        let { statusCode, code = statusCode, reason, message } = err
+        let {
+          statusCode,
+          code = statusCode,
+          reason,
+          message,
+        } = err
         if (code === 404) {
           reason = 'Cluster not found'
           message = 'The cluster you are looking for doesn\'t exist'
@@ -201,12 +159,81 @@ export default {
           reason = 'Oops, something went wrong'
           message = 'An unexpected error occurred. Please try again later'
         }
-        this.error = Object.assign(new Error(message), {
+        error.value = Object.assign(new Error(message), {
           code,
           reason,
         })
       }
-    },
+    }
+
+    onBeforeMount(() => {
+      readyState.value = 'initial'
+    })
+
+    onMounted(async () => {
+      await load(route)
+      readyState.value = 'loaded'
+    })
+
+    onBeforeUnmount(() => {
+      readyState.value = 'initial'
+    })
+
+    onBeforeRouteUpdate(async to => {
+      if (isLoadRequired(route, to)) {
+        await load(to)
+      }
+    })
+
+    onBeforeRouteLeave(() => {
+      readyState.value = 'initial'
+    })
+
+    watch(() => route.path, value => {
+      if (value) {
+        readyState.value = 'loaded'
+      }
+    })
+
+    watch(() => shootItem.value, value => {
+      if (readyState.value === 'loaded') {
+        if (!value) {
+          error.value = Object.assign(new Error('The cluster you are looking for is no longer available'), {
+            code: 410,
+            reason: 'Cluster is gone',
+          })
+        } else if ([404, 410].includes(error.value?.code)) {
+          error.value = null
+        }
+      }
+    })
+
+    provide('activePopoverKey', activePopoverKey)
+
+    const projectItem = toRef(projectStore, 'project')
+
+    useProvideProjectItem(projectItem)
+    const {
+      hasShootWorkerGroups,
+    } = useProvideShootItem(shootItem, {
+      cloudProfileStore,
+      projectStore,
+      seedStore,
+    })
+
+    useProvideShootHelper(shootItem, {
+      cloudProfileStore,
+      configStore,
+      gardenerExtensionStore,
+      credentialStore,
+      seedStore,
+    })
+
+    return {
+      component,
+      componentProperties,
+      load,
+    }
   },
 }
 </script>

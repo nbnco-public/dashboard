@@ -8,7 +8,7 @@
 
 const { pick, head } = require('lodash')
 const assert = require('assert').strict
-const { TokenSet } = require('openid-client')
+const { TokenSet, generators } = require('openid-client')
 const setCookieParser = require('set-cookie-parser')
 const { mockRequest } = require('@gardener-dashboard/request')
 
@@ -17,11 +17,10 @@ const {
   COOKIE_HEADER_PAYLOAD,
   COOKIE_SIGNATURE,
   COOKIE_TOKEN,
-  decodeState,
   setCookies,
   sign,
   decrypt,
-  decode
+  decode,
 } = security
 
 async function getCookieValue (tokenSet) {
@@ -29,7 +28,7 @@ async function getCookieValue (tokenSet) {
   const res = {
     cookie (key, value) {
       values.push(`${key}=${value}`)
-    }
+    },
   }
   await setCookies(res, tokenSet)
   return values.join(';')
@@ -39,10 +38,10 @@ async function parseCookies (res) {
   const {
     [COOKIE_HEADER_PAYLOAD]: cookieHeaderPayload,
     [COOKIE_SIGNATURE]: cookieSignature,
-    [COOKIE_TOKEN]: cookieToken
+    [COOKIE_TOKEN]: cookieToken,
   } = setCookieParser.parse(res, {
     decodeValues: true,
-    map: true
+    map: true,
   })
   assert.strictEqual(cookieHeaderPayload.sameSite, 'Lax')
   assert.strictEqual(cookieHeaderPayload.httpOnly, undefined)
@@ -65,7 +64,7 @@ class Client {
     client_id: clientId,
     client_secret: clientSecret,
     redirect_uris: redirectUris,
-    response_types: responseTypes
+    response_types: responseTypes,
   }) {
     this.user = user
     this.issuer = issuer
@@ -78,7 +77,7 @@ class Client {
   authorizationUrl ({
     redirect_uri: redirectUri,
     state,
-    scope
+    scope,
   }) {
     const url = new URL(this.issuer)
     url.pathname = '/auth'
@@ -89,6 +88,10 @@ class Client {
     params.append('scope', scope)
     params.append('response_type', head(this.responseTypes))
     return url.toString()
+  }
+
+  callbackParams (req) {
+    return pick(req.query, ['code', 'state', 'iss'])
   }
 
   async callback (redirectUri, { code }, { response_type: responseType }) {
@@ -103,7 +106,7 @@ class Client {
   refresh (token) {
     const tokenSet = new TokenSet({
       id_token: token,
-      refresh_token: 'refresh-token'
+      refresh_token: 'refresh-token',
     })
     tokenSet.expires_at = tokenSet.claims().exp
     return tokenSet
@@ -118,6 +121,7 @@ describe('auth', function () {
   let agent
   let getIssuerClientStub
   let mockRefresh
+  let mockState
 
   beforeAll(() => {
     agent = createAgent()
@@ -130,38 +134,34 @@ describe('auth', function () {
   beforeEach(() => {
     mockRequest.mockReset()
     const client = Object.assign(new Client({ user, ...oidc }), {
-      CLOCK_TOLERANCE: oidc.clockTolerance || 30
+      CLOCK_TOLERANCE: oidc.clockTolerance || 30,
     })
     getIssuerClientStub = jest.spyOn(security, 'getIssuerClient').mockResolvedValue(client)
     mockRefresh = jest.spyOn(client, 'refresh')
+    mockState = jest.spyOn(generators, 'state').mockReturnValue('state')
   })
 
   it('should redirect to authorization url without frontend redirectUrl', async function () {
-    const redirectPath = '/'
     const redirectUri = head(oidc.redirect_uris)
-    const redirectOrigin = new URL(redirectUri).origin
 
     const res = await agent
       .get('/auth')
       .redirects(0)
       .expect(302)
 
-    expect(getIssuerClientStub).toBeCalledTimes(1)
+    expect(getIssuerClientStub).toHaveBeenCalledTimes(1)
+    expect(mockState).toHaveBeenCalledTimes(1)
     const url = new URL(res.headers.location)
     expect(url.searchParams.get('client_id')).toBe(oidc.client_id)
     expect(url.searchParams.get('redirect_uri')).toBe(redirectUri)
     expect(url.searchParams.get('scope')).toBe(oidc.scope)
     const state = url.searchParams.get('state')
-    expect(decodeState(state)).toEqual({
-      redirectPath,
-      redirectOrigin
-    })
+    expect(state).toEqual('state')
   })
 
   it('should redirect to authorization url with frontend redirectUrl', async function () {
     const redirectPath = '/namespace/garden-foo/administration'
     const redirectUri = head(oidc.redirect_uris)
-    const redirectOrigin = new URL(redirectUri).origin
     const redirectUrl = new URL(redirectPath, redirectUri).toString()
 
     const res = await agent
@@ -170,14 +170,11 @@ describe('auth', function () {
       .redirects(0)
       .expect(302)
 
-    expect(getIssuerClientStub).toBeCalledTimes(1)
+    expect(getIssuerClientStub).toHaveBeenCalledTimes(1)
     const url = new URL(res.headers.location)
     expect(url.searchParams.get('redirect_uri')).toBe(redirectUri)
     const state = url.searchParams.get('state')
-    expect(decodeState(state)).toEqual({
-      redirectPath,
-      redirectOrigin
-    })
+    expect(state).toEqual('state')
   })
 
   it('should fail to redirect to authorization url', async function () {
@@ -189,7 +186,7 @@ describe('auth', function () {
       .redirects(0)
       .expect(302)
 
-    expect(getIssuerClientStub).toBeCalledTimes(1)
+    expect(getIssuerClientStub).toHaveBeenCalledTimes(1)
     expect(res.headers).toHaveProperty('location', `/login#error=${encodeURIComponent(message)}`)
   })
 
@@ -204,27 +201,27 @@ describe('auth', function () {
       .redirects(0)
       .expect(302)
 
-    expect(mockRequest).toBeCalledTimes(2)
+    expect(mockRequest).toHaveBeenCalledTimes(2)
     expect(mockRequest.mock.calls[0]).toEqual([
       {
         ...pick(fixtures.kube, [':scheme', ':authority', 'authorization']),
         ':method': 'post',
-        ':path': '/apis/authentication.k8s.io/v1/tokenreviews'
+        ':path': '/apis/authentication.k8s.io/v1/tokenreviews',
       },
       {
         apiVersion: 'authentication.k8s.io/v1',
         kind: 'TokenReview',
         metadata: {
-          name: expect.stringMatching(/token-\d+/)
+          name: expect.stringMatching(/token-\d+/),
         },
         spec: {
-          token: bearer
-        }
-      }
+          token: bearer,
+        },
+      },
     ])
     expect(mockRequest.mock.calls[1]).toMatchSnapshot()
 
-    expect(getIssuerClientStub).toBeCalledTimes(1)
+    expect(getIssuerClientStub).toHaveBeenCalledTimes(2)
     expect(res.headers).toHaveProperty('location', '/')
   })
 
@@ -242,7 +239,7 @@ describe('auth', function () {
       .redirects(0)
       .expect(302)
 
-    expect(getIssuerClientStub).toBeCalledTimes(1)
+    expect(getIssuerClientStub).toHaveBeenCalledTimes(2)
     expect(res.headers).toHaveProperty('location', `/login#error=${encodeURIComponent(message)}`)
   })
 
@@ -260,23 +257,23 @@ describe('auth', function () {
       .expect('content-type', /json/)
       .expect(200)
 
-    expect(mockRequest).toBeCalledTimes(2)
+    expect(mockRequest).toHaveBeenCalledTimes(2)
     expect(mockRequest.mock.calls[0]).toEqual([
       {
         ...pick(fixtures.kube, [':scheme', ':authority', 'authorization']),
         ':method': 'post',
-        ':path': '/apis/authentication.k8s.io/v1/tokenreviews'
+        ':path': '/apis/authentication.k8s.io/v1/tokenreviews',
       },
       {
         apiVersion: 'authentication.k8s.io/v1',
         kind: 'TokenReview',
         metadata: {
-          name: expect.stringMatching(/token-\d+/)
+          name: expect.stringMatching(/token-\d+/),
         },
         spec: {
-          token: bearer
-        }
-      }
+          token: bearer,
+        },
+      },
     ])
     expect(mockRequest.mock.calls[1]).toMatchSnapshot()
 
@@ -288,7 +285,7 @@ describe('auth', function () {
       aud: ['gardener'],
       isAdmin: false,
       exp: expect.toBeWithinRange(expiresAt, expiresAt + 3),
-      jti: expect.stringMatching(/[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}/i)
+      jti: expect.stringMatching(/[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}/i),
     }))
     expect(idToken).toEqual(bearer)
     expect(refreshToken).toBeUndefined()
@@ -307,10 +304,10 @@ describe('auth', function () {
     const {
       [COOKIE_HEADER_PAYLOAD]: cookieHeaderPayload,
       [COOKIE_SIGNATURE]: cookieSignature,
-      [COOKIE_TOKEN]: cookieToken
+      [COOKIE_TOKEN]: cookieToken,
     } = setCookieParser.parse(res, {
       decodeValues: true,
-      map: true
+      map: true,
     })
     expect(cookieHeaderPayload.value).toHaveLength(0)
     expect(cookieHeaderPayload.expires).toEqual(ZERO_DATE)
@@ -326,25 +323,25 @@ describe('auth', function () {
     const idTokenPayload = {
       iat,
       sub: id,
-      exp: iat - 60
+      exp: iat - 60,
     }
     const accessTokenPayload = {
       iat,
       id,
       exp: iat + 24 * 60 * 60,
       refresh_at: idTokenPayload.exp,
-      aud: ['gardener']
+      aud: ['gardener'],
     }
     // in this test the refreshToken is return as new idToken in the `client.refresh` mock implementation
     const refreshTokenPayload = {
       iat: iat + 60,
       sub: id,
-      exp: iat + 61 * 60
+      exp: iat + 61 * 60,
     }
     const tokenSet = new TokenSet({
       id_token: await sign(idTokenPayload),
       access_token: await sign(accessTokenPayload),
-      refresh_token: await sign(refreshTokenPayload)
+      refresh_token: await sign(refreshTokenPayload),
     })
 
     mockRequest.mockImplementationOnce(fixtures.auth.mocks.reviewToken())
@@ -356,29 +353,29 @@ describe('auth', function () {
       .expect('content-type', /json/)
       .expect(200)
 
-    expect(mockRequest).toBeCalledTimes(2)
+    expect(mockRequest).toHaveBeenCalledTimes(2)
     expect(mockRequest.mock.calls).toEqual([[
       {
         ...pick(fixtures.kube, [':scheme', ':authority', 'authorization']),
         ':method': 'post',
-        ':path': '/apis/authentication.k8s.io/v1/tokenreviews'
+        ':path': '/apis/authentication.k8s.io/v1/tokenreviews',
       },
       {
         apiVersion: 'authentication.k8s.io/v1',
         kind: 'TokenReview',
         metadata: {
-          name: expect.stringMatching(/^token-\d+/)
+          name: expect.stringMatching(/^token-\d+/),
         },
         spec: {
-          token: tokenSet.refresh_token
-        }
-      }
+          token: tokenSet.refresh_token,
+        },
+      },
     ], [
       {
         ...pick(fixtures.kube, [':scheme', ':authority']),
         authorization: `Bearer ${tokenSet.refresh_token}`,
         ':method': 'post',
-        ':path': '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews'
+        ':path': '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews',
       },
       {
         apiVersion: 'authorization.k8s.io/v1',
@@ -388,12 +385,12 @@ describe('auth', function () {
           resourceAttributes: {
             group: '',
             resource: 'secrets',
-            verb: 'get'
-          }
-        }
-      }
+            verb: 'get',
+          },
+        },
+      },
     ]])
-    expect(mockRefresh).toBeCalledTimes(1)
+    expect(mockRefresh).toHaveBeenCalledTimes(1)
     expect(mockRefresh.mock.calls[0]).toEqual([tokenSet.refresh_token])
 
     const [accessToken, idToken, refreshToken] = await parseCookies(res)
@@ -409,7 +406,7 @@ describe('auth', function () {
       aud: accessTokenPayload.aud,
       isAdmin: false,
       refresh_at: refreshTokenPayload.exp,
-      rti: expect.stringMatching(/^[a-z0-9]{7}$/)
+      rti: expect.stringMatching(/^[a-z0-9]{7}$/),
     })
   })
 })

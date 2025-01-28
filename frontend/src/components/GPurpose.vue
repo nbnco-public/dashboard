@@ -5,98 +5,71 @@ SPDX-License-Identifier: Apache-2.0
 -->
 
 <template>
-  <div>
-    <v-select
-      v-model="internalPurpose"
-      hint="Indicate the importance of the cluster"
-      color="primary"
-      item-color="primary"
-      label="Purpose"
-      :items="purposes"
-      item-title="purpose"
-      item-value="purpose"
-      persistent-hint
-      :error-messages="getErrorMessages('internalPurpose')"
-      variant="underlined"
-      @update:model-value="onInputPurpose"
-      @blur="v$.internalPurpose.$touch()"
-    >
-      <template #item="{ item, props }">
-        <v-list-item
-          v-bind="props"
-          :subtitle="item.raw.description"
-        />
-      </template>
-    </v-select>
-  </div>
+  <v-select
+    v-model="v$.internalValue.$model"
+    hint="Indicate the importance of the cluster. Available purposes may be limited by the selected secret. If any add-on is enabled, only purpose evaluation can be selected."
+    color="primary"
+    item-color="primary"
+    label="Purpose"
+    :items="purposes"
+    :item-props="itemProps"
+    persistent-hint
+    :error-messages="getErrorMessages(v$.internalValue)"
+    variant="underlined"
+    @blur="v$.internalValue.$touch()"
+  />
 </template>
 
 <script>
 import { useVuelidate } from '@vuelidate/core'
 import { required } from '@vuelidate/validators'
 
-import {
-  getValidationErrors,
-  purposesForSecret,
-} from '@/utils'
-
-import { map } from '@/lodash'
-
-const validationErrors = {
-  internalPurpose: {
-    required: 'Purpose is required.',
-  },
-}
+import { withFieldName } from '@/utils/validators'
+import { getErrorMessages } from '@/utils'
 
 export default {
   props: {
-    secret: {
-      type: Object,
+    modelValue: {
+      type: String,
+    },
+    purposes: {
+      type: Array,
+      required: true,
     },
   },
   emits: [
-    'update-purpose',
+    'update:modelValue',
   ],
   setup () {
     return {
       v$: useVuelidate(),
     }
   },
-  data () {
+  validations () {
     return {
-      validationErrors,
-      valid: undefined,
-      internalPurpose: undefined,
+      internalValue: withFieldName('Purpose', {
+        required,
+      }),
     }
   },
-  validations () {
-    return this.validators
-  },
   computed: {
-    validators () {
-      return {
-        internalPurpose: {
-          required,
-        },
-      }
-    },
-    purposes () {
-      const purposes = purposesForSecret(this.secret)
-      return map(purposes, purpose => ({
-        purpose,
-        description: this.descriptionForPurpose(purpose),
-      }))
+    internalValue: {
+      get () {
+        return this.modelValue ?? ''
+      },
+      set (value) {
+        this.$emit('update:modelValue', value)
+      },
     },
   },
   methods: {
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
+    itemProps (value) {
+      return {
+        value,
+        subtitle: this.getPurposeDescription(value),
+      }
     },
-    onInputPurpose () {
-      this.v$.internalPurpose.$touch()
-      this.$emit('update-purpose', this.internalPurpose)
-    },
-    descriptionForPurpose (purpose) {
+    getPurposeDescription (purpose) {
       switch (purpose) {
         case 'testing':
           return 'Testing clusters do not get a monitoring or a logging stack as part of their control planes'
@@ -104,16 +77,7 @@ export default {
           return ''
       }
     },
-    resetPurpose () {
-      if (!this.purposes.some(p => p.purpose === this.internalPurpose)) {
-        this.internalPurpose = undefined
-        this.onInputPurpose()
-      }
-    },
-    setPurpose (purpose) {
-      this.internalPurpose = purpose
-      this.onInputPurpose()
-    },
+    getErrorMessages,
   },
 }
 </script>

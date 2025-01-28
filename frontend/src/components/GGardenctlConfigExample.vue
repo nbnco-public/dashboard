@@ -39,15 +39,13 @@ SPDX-License-Identifier: Apache-2.0
       />
       Note that the
       <span class="font-family-monospace">kubeconfig</span>
-      refers to the path of the garden cluster
+      refers to the path of the Garden cluster
       <span class="font-family-monospace">kubeconfig</span>
       which you can download from the
-      <router-link
+      <g-text-router-link
         :to="accountRoute"
-        class="text-anchor"
-      >
-        Account
-      </router-link>
+        text="Account"
+      />
       page.
     </div>
   </div>
@@ -59,10 +57,17 @@ import { mapState } from 'pinia'
 import { useConfigStore } from '@/store/config'
 
 import GCodeBlock from './GCodeBlock.vue'
+import GTextRouterLink from './GTextRouterLink.vue'
 
 export default {
   components: {
     GCodeBlock,
+    GTextRouterLink,
+  },
+  props: {
+    shootNamespace: {
+      type: String,
+    },
   },
   computed: {
     ...mapState(useConfigStore, [
@@ -71,12 +76,13 @@ export default {
     accountRoute () {
       return {
         name: 'Account',
+        query: { namespace: this.shootNamespace },
       }
     },
     gardenctlConfigYaml () {
       return `gardens:
   - identity: ${this.clusterIdentity}
-    kubeconfig: "<path-to-garden-cluster-kubeconfig>"`
+    kubeconfig: <path-to-garden-cluster-kubeconfig>`
     },
     configCmd () {
       return `gardenctl config set-garden ${this.clusterIdentity} --kubeconfig "<path-to-garden-cluster-kubeconfig>"`

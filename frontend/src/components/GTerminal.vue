@@ -364,10 +364,10 @@ SPDX-License-Identifier: Apache-2.0
 <script>
 import { reactive } from 'vue'
 import { mapState } from 'pinia'
-import { Terminal } from 'xterm'
-import { FitAddon } from 'xterm-addon-fit'
-import { WebLinksAddon } from 'xterm-addon-web-links'
-import 'xterm/css/xterm.css'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import '@xterm/xterm/css/xterm.css'
 
 import { useAppStore } from '@/store/app'
 import { useConfigStore } from '@/store/config'
@@ -381,7 +381,6 @@ import GDisconnected from '@/components/icons/GDisconnected.vue'
 import GSplitVertically from '@/components/icons/GSplitVertically.vue'
 import GSplitHorizontally from '@/components/icons/GSplitHorizontally.vue'
 
-import { isGatewayTimeout } from '@/utils/error'
 import {
   targetText,
   transformHtml,
@@ -393,12 +392,10 @@ import {
   Spinner,
 } from '@/lib/terminal'
 
-import {
-  get,
-  assign,
-  find,
-  head,
-} from '@/lodash'
+import head from 'lodash/head'
+import find from 'lodash/find'
+import assign from 'lodash/assign'
+import get from 'lodash/get'
 
 export default {
   components: {
@@ -492,13 +489,13 @@ export default {
     },
     defaultNode () {
       const defaultNode = find(this.config.nodes, ['data.kubernetesHostname', this.terminalSession.node])
-      return get(defaultNode, 'data.kubernetesHostname') || get(head(this.config.nodes), 'data.kubernetesHostname')
+      return get(defaultNode, ['data', 'kubernetesHostname']) || get(head(this.config.nodes), ['data', 'kubernetesHostname'])
     },
     defaultPrivilegedMode () {
       return this.privilegedMode || false
     },
     privilegedMode () {
-      return get(this.terminalSession, 'container.privileged') || this.terminalSession.hostPID || this.terminalSession.hostNetwork
+      return get(this.terminalSession, ['container', 'privileged']) || this.terminalSession.hostPID || this.terminalSession.hostNetwork
     },
     connectionStateText () {
       switch (this.terminalSession.connectionState) {
@@ -516,17 +513,17 @@ export default {
       }
     },
     heartbeatIntervalSeconds () {
-      return get(this.terminal, 'heartbeatIntervalSeconds', 60)
+      return get(this.terminal, ['heartbeatIntervalSeconds'], 60)
     },
     privilegedModeText () {
       return this.privilegedMode ? 'Privileged' : 'Unprivileged'
     },
     imageShortText () {
-      const image = get(this.terminalSession, 'container.image', '')
+      const image = get(this.terminalSession, ['container', 'image'], '')
       return image.substring(image.lastIndexOf('/') + 1)
     },
     imageHelpHtml () {
-      return transformHtml(get(this.terminalSession, 'imageHelpText', ''))
+      return transformHtml(get(this.terminalSession, ['imageHelpText'], ''))
     },
     name () {
       // name is undefined in case of garden terminal
@@ -602,16 +599,16 @@ export default {
       this.$emit('terminated')
     },
     async configure (refName) {
-      this.loading[refName] = true
+      this.loading[refName] = true // eslint-disable-line security/detect-object-injection
       const { namespace, name, target } = this.data
       try {
         const { data: config } = await this.api.terminalConfig({ name, namespace, target })
 
         assign(this.config, config)
       } catch (err) {
-        this.showErrorSnackbarBottom(get(err, 'response.data.message', err.message))
+        this.showErrorSnackbarBottom(get(err, ['response', 'data', 'message'], err.message))
       } finally {
-        this.loading[refName] = false
+        this.loading[refName] = false // eslint-disable-line security/detect-object-injection
       }
 
       const initialState = {
@@ -683,10 +680,7 @@ export default {
       try {
         await terminalSession.open()
       } catch (err) {
-        let message = get(err, 'response.data.message', err.message)
-        if (isGatewayTimeout(err)) {
-          message = 'Opening the terminal session timed out'
-        }
+        const message = get(err, ['response', 'data', 'message'], err.message)
         this.showErrorSnackbarBottom(message)
         terminalSession.setDisconnectedState()
       }

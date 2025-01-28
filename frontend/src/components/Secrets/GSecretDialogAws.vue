@@ -7,22 +7,19 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    :vendor="vendor"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
+    :provider-type="providerType"
     :create-title="`Add new ${name} Secret`"
     :replace-title="`Replace ${name} Secret`"
   >
     <template #secret-slot>
       <div>
         <v-text-field
-          ref="accessKeyId"
           v-model="accessKeyId"
           color="primary"
           label="Access Key Id"
-          :error-messages="getErrorMessages('accessKeyId')"
-          counter="128"
+          :error-messages="getErrorMessages(v$.accessKeyId)"
           hint="e.g. AKIAIOSFODNN7EXAMPLE"
           variant="underlined"
           @update:model-value="v$.accessKeyId.$touch()"
@@ -34,10 +31,9 @@ SPDX-License-Identifier: Apache-2.0
           v-model="secretAccessKey"
           color="primary"
           label="Secret Access Key"
-          :error-messages="getErrorMessages('secretAccessKey')"
+          :error-messages="getErrorMessages(v$.secretAccessKey)"
           :append-icon="hideSecret ? 'mdi-eye' : 'mdi-eye-off'"
           :type="hideSecret ? 'password' : 'text'"
-          counter="40"
           hint="e.g. wJalrXUtnFEMIK7MDENG/bPxRfiCYzEXAMPLEKEY"
           variant="underlined"
           @click:append="() => (hideSecret = !hideSecret)"
@@ -45,7 +41,7 @@ SPDX-License-Identifier: Apache-2.0
           @blur="v$.secretAccessKey.$touch()"
         />
       </div>
-      <div v-if="vendor === 'aws-route53'">
+      <div v-if="providerType === 'aws-route53'">
         <v-text-field
           v-model="awsRegion"
           color="primary"
@@ -56,10 +52,10 @@ SPDX-License-Identifier: Apache-2.0
       </div>
     </template>
     <template #help-slot>
-      <p v-if="vendor==='aws'">
+      <p v-if="providerType==='aws'">
         Before you can provision and access a Kubernetes cluster, you need to add account credentials. Gardener needs the credentials to provision and operate the AWS infrastructure for your Kubernetes cluster.
       </p>
-      <p v-if="vendor==='aws-route53'">
+      <p v-if="providerType==='aws-route53'">
         Before you can use an external DNS provider, you need to add account credentials.
         The user needs permissions on the hosted zone to list and change DNS records.
       </p>
@@ -78,15 +74,15 @@ SPDX-License-Identifier: Apache-2.0
         </g-external-link>).
       </p>
       <g-code-block
-        v-if="vendor==='aws'"
-        height="100%"
+        v-if="providerType==='aws'"
+        max-height="100%"
         lang="json"
         :content="JSON.stringify(templateAws, undefined, 2)"
       />
-      <div v-if="vendor==='aws-route53'">
+      <div v-if="providerType==='aws-route53'">
         <p>In this example, the placeholder for the hosted zone is Z2XXXXXXXXXXXX</p>
         <g-code-block
-          height="100%"
+          max-height="100%"
           lang="json"
           :content="JSON.stringify(templateAwsRoute53, undefined, 2)"
         />
@@ -107,28 +103,14 @@ import GSecretDialog from '@/components/Secrets/GSecretDialog'
 import GCodeBlock from '@/components/GCodeBlock'
 import GExternalLink from '@/components/GExternalLink'
 
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
+
 import {
+  withFieldName,
   alphaNumUnderscore,
   base64,
 } from '@/utils/validators'
-import {
-  getValidationErrors,
-  setDelayedInputFocus,
-} from '@/utils'
-
-const validationErrors = {
-  accessKeyId: {
-    required: 'You can\'t leave this empty.',
-    minLength: 'It must contain at least 16 characters.',
-    maxLength: 'It exceeds the maximum length of 128 characters.',
-    alphaNumUnderscore: 'Please use only alphanumeric characters and underscore.',
-  },
-  secretAccessKey: {
-    required: 'You can\'t leave this empty.',
-    minLength: 'It must contain at least 40 characters.',
-    base64: 'Invalid secret access key.',
-  },
-}
+import { getErrorMessages } from '@/utils'
 
 export default {
   components: {
@@ -141,10 +123,10 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
-    vendor: {
+    providerType: {
       type: String,
     },
   },
@@ -152,17 +134,28 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const {
+      accessKeyId,
+      secretAccessKey,
+      awsRegion,
+    } = secretStringDataRefs({
+      accessKeyID: 'accessKeyId',
+      secretAccessKey: 'secretAccessKey',
+      AWS_REGION: 'awsRegion',
+    })
+
     return {
+      accessKeyId,
+      secretAccessKey,
+      awsRegion,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      accessKeyId: undefined,
-      secretAccessKey: undefined,
-      awsRegion: undefined,
       hideSecret: true,
-      validationErrors,
       templateAws: {
         Version: '2012-10-17',
         Statement: [
@@ -247,8 +240,19 @@ export default {
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      accessKeyId: withFieldName('Access Key ID', {
+        required,
+        minLength: minLength(16),
+        maxLength: maxLength(128),
+        alphaNumUnderscore,
+      }),
+      secretAccessKey: withFieldName('Secret Access Key', {
+        required,
+        minLength: minLength(40),
+        base64,
+      }),
+    }
   },
   computed: {
     visible: {
@@ -262,64 +266,21 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    secretData () {
-      return {
-        accessKeyID: this.accessKeyId,
-        secretAccessKey: this.secretAccessKey,
-        AWS_REGION: this.awsRegion,
-      }
-    },
-    validators () {
-      const validators = {
-        accessKeyId: {
-          required,
-          minLength: minLength(16),
-          maxLength: maxLength(128),
-          alphaNumUnderscore,
-        },
-        secretAccessKey: {
-          required,
-          minLength: minLength(40),
-          base64,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
     name () {
-      if (this.vendor === 'aws') {
+      if (this.providerType === 'aws') {
         return 'AWS'
       }
-      if (this.vendor === 'aws-route53') {
+      if (this.providerType === 'aws-route53') {
         return 'Amazon Route 53'
       }
       return undefined
     },
   },
-  watch: {
-    value: function (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
   methods: {
-    reset () {
-      this.v$.$reset()
-
-      this.accessKeyId = ''
-      this.secretAccessKey = ''
-      this.awsRegion = ''
-
-      if (!this.isCreateMode) {
-        setDelayedInputFocus(this, 'accessKeyId')
-      }
-    },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>

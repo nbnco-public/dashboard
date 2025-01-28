@@ -7,125 +7,129 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <div class="d-flex flex-nowrap align-center">
     <div class="d-flex flex-wrap">
-      <div class="regularInput">
+      <div class="regular-input">
         <v-text-field
           v-model="worker.name"
           color="primary"
-          :error-messages="getErrorMessages('worker.name')"
+          :error-messages="getErrorMessages(v$.worker.name)"
           counter="15"
           label="Group Name"
           variant="underlined"
-          @input="onInputName"
+          @input="v$.worker.name.$touch()"
           @blur="v$.worker.name.$touch()"
         />
       </div>
-      <div class="smallInput">
+      <div class="small-input">
         <v-select
           v-model="machineArchitecture"
           color="primary"
           item-color="primary"
           :items="machineArchitectures"
-          :error-messages="getErrorMessages('machineArchitecture')"
+          :error-messages="getErrorMessages(v$.machineArchitecture)"
           label="Architecture"
           variant="underlined"
           @blur="v$.machineArchitecture.$touch()"
         />
       </div>
-      <div class="regularInput">
+      <div class="regular-input">
         <g-machine-type
           v-model="machineTypeValue"
           :machine-types="machineTypes"
+          :field-name="`${workerGroupName} Machine Type`"
         />
       </div>
-      <div class="regularInput">
+      <div class="regular-input">
         <g-machine-image
           :machine-images="machineImages"
           :worker="worker"
           :machine-type="selectedMachineType"
-          :update-o-s-maintenance="updateOSMaintenance"
+          :auto-update="maintenanceAutoUpdateMachineImageVersion"
+          :field-name="`${workerGroupName} Machine Image`"
         />
       </div>
-      <div class="regularInput">
+      <div class="regular-input">
         <g-container-runtime
           :machine-image-cri="machineImageCri"
           :worker="worker"
           :kubernetes-version="kubernetesVersion"
+          :field-name="`${workerGroupName} Container Runtime`"
         />
       </div>
       <div
         v-if="volumeInCloudProfile"
-        class="regularInput"
+        class="regular-input"
       >
         <g-volume-type
           :volume-types="volumeTypes"
           :worker="worker"
           :cloud-profile-name="cloudProfileName"
+          :field-name="`${workerGroupName} Volume Type`"
         />
       </div>
-      <div
-        v-if="canDefineVolumeSize"
-        class="smallInput"
-      >
+      <div :class="volumeInCloudProfile ? 'small-input' : 'regular-input'">
         <g-volume-size-input
           v-model="volumeSize"
+          v-model:has-custom-storage-size="hasCustomStorageSize"
           :min="minimumVolumeSize"
+          :default-storage-size="defaultStorageSize"
+          :has-volume-types="volumeInCloudProfile"
           color="primary"
-          :error-messages="getErrorMessages('volumeSize')"
-          label="Volume Size"
+          :error-messages="getErrorMessages(v$.volumeSize)"
+          @update:custom-storage="onInputVolumeSize"
           @update:model-value="onInputVolumeSize"
           @blur="v$.volumeSize.$touch()"
         />
       </div>
-      <div class="smallInput">
+      <div class="small-input">
         <v-text-field
           v-model="innerMin"
           min="0"
           color="primary"
-          :error-messages="getErrorMessages('worker.minimum')"
+          :error-messages="getErrorMessages(v$.worker.minimum)"
           type="number"
           label="Autoscaler Min."
           variant="underlined"
-          @input="onInputMinimum"
+          @input="v$.worker.minimum.$touch()"
           @blur="v$.worker.minimum.$touch()"
         />
       </div>
-      <div class="smallInput">
+      <div class="small-input">
         <v-text-field
           v-model="innerMax"
           min="0"
           color="primary"
-          :error-messages="getErrorMessages('worker.maximum')"
           type="number"
           label="Autoscaler Max."
           variant="underlined"
-          @input="onInputMaximum"
+          :error-messages="getErrorMessages(v$.worker.maximum)"
+          @input="v$.worker.maximum.$touch()"
           @blur="v$.worker.maximum.$touch()"
         />
       </div>
-      <div class="smallInput">
+      <div class="small-input">
         <v-text-field
           v-model="maxSurge"
           min="0"
           color="primary"
-          :error-messages="getErrorMessages('worker.maxSurge')"
+          :error-messages="getErrorMessages(v$.worker.maxSurge)"
           label="Max. Surge"
           variant="underlined"
-          @input="onInputMaxSurge"
+          @input="v$.worker.maxSurge.$touch()"
           @blur="v$.worker.maxSurge.$touch()"
         />
       </div>
 
       <div
-        v-if="zonedCluster"
-        class="regularInput"
+        v-if="isZonedCluster"
+        class="regular-input"
       >
         <v-select
           v-model="selectedZones"
           color="primary"
           item-color="primary"
-          label="Zone"
+          label="Zones"
           :items="zoneItems"
-          :error-messages="getErrorMessages('selectedZones')"
+          :error-messages="getErrorMessages(v$.selectedZones)"
           multiple
           chips
           closable-chips
@@ -135,14 +139,7 @@ SPDX-License-Identifier: Apache-2.0
           variant="underlined"
           @update:model-value="onInputZones"
           @blur="v$.selectedZones.$touch()"
-        >
-          <template #item="{ props, item }">
-            <v-list-item
-              v-bind="props"
-              :disabled="item.raw.disabled"
-            />
-          </template>
-        </v-select>
+        />
       </div>
     </div>
     <div class="ml-4 mr-2">
@@ -169,63 +166,35 @@ import GVolumeType from '@/components/ShootWorkers/GVolumeType'
 import GMachineImage from '@/components/ShootWorkers/GMachineImage'
 import GContainerRuntime from '@/components/ShootWorkers/GContainerRuntime'
 
+import { useShootContext } from '@/composables/useShootContext'
+
 import {
-  getValidationErrors,
-  parseSize,
-} from '@/utils'
-import {
-  uniqueWorkerName,
-  resourceName,
+  withFieldName,
+  lowerCaseAlphaNumHyphen,
   noStartEndHyphen,
   numberOrPercentage,
+  withMessage,
+  withParams,
 } from '@/utils/validators'
-
 import {
-  isEmpty,
-  filter,
-  map,
-  includes,
-  sortBy,
-  find,
-  concat,
-  last,
-  difference,
-  get,
-  set,
-  head,
-  pick,
-} from '@/lodash'
+  getErrorMessages,
+  convertToGi,
+} from '@/utils'
 
-const validationErrors = {
-  worker: {
-    name: {
-      required: 'Name is required',
-      maxLength: 'Name is too long',
-      resourceName: 'Name must only be lowercase letters, numbers and hyphens',
-      uniqueWorkerName: 'Name is taken. Try another.',
-      noStartEndHyphen: 'Name must not start or end with a hyphen',
-    },
-    minimum: {
-      minValue: 'Invalid value',
-    },
-    maximum: {
-      minValue: 'Invalid value',
-      systemComponents: 'Value must be greater or equal to the number of zones configured for this pool',
-    },
-    maxSurge: {
-      numberOrPercentage: 'Invalid value',
-    },
-  },
-  selectedZones: {
-    required: 'Zone is required',
-  },
-  volumeSize: {
-    minVolumeSize: 'Invalid volume size',
-  },
-  machineArchitecture: {
-    required: 'Machine Architecture is required',
-  },
-}
+import isEmpty from 'lodash/isEmpty'
+import filter from 'lodash/filter'
+import map from 'lodash/map'
+import includes from 'lodash/includes'
+import sortBy from 'lodash/sortBy'
+import find from 'lodash/find'
+import concat from 'lodash/concat'
+import last from 'lodash/last'
+import difference from 'lodash/difference'
+import get from 'lodash/get'
+import set from 'lodash/set'
+import head from 'lodash/head'
+import pick from 'lodash/pick'
+import every from 'lodash/every'
 
 export default {
   components: {
@@ -240,127 +209,122 @@ export default {
       type: Object,
       required: true,
     },
-    workers: {
-      type: Array,
-      required: true,
-    },
-    cloudProfileName: {
-      type: String,
-    },
-    region: {
-      type: String,
-    },
-    allZones: {
-      type: Array,
-    },
-    availableZones: {
-      type: Array,
-    },
-    zonedCluster: {
-      type: Boolean,
-    },
-    updateOSMaintenance: {
-      type: Boolean,
-    },
-    isNew: {
-      type: Boolean,
-    },
-    maxAdditionalZones: {
-      type: Number,
-    },
-    initialZones: {
-      type: Array,
-    },
-    kubernetesVersion: {
-      type: String,
-    },
   },
-  emits: [
-    'removedZones',
-    'updateMaxSurge',
-  ],
   setup () {
+    const {
+      isNewCluster,
+      cloudProfileName,
+      kubernetesVersion,
+      region,
+      allZones,
+      availableZones,
+      initialZones,
+      maxAdditionalZones,
+      isZonedCluster,
+      maintenanceAutoUpdateMachineImageVersion,
+      machineArchitectures,
+      volumeTypes,
+      providerWorkers,
+    } = useShootContext()
+
     return {
       v$: useVuelidate(),
+      isNewCluster,
+      cloudProfileName,
+      kubernetesVersion,
+      region,
+      allZones,
+      availableZones,
+      initialZones,
+      maxAdditionalZones,
+      isZonedCluster,
+      maintenanceAutoUpdateMachineImageVersion,
+      machineArchitectures,
+      volumeTypes,
+      providerWorkers,
     }
   },
   data () {
     return {
-      validationErrors,
-      immutableZones: undefined,
       volumeSize: undefined,
+      hasCustomStorageSize: false,
     }
   },
   validations () {
-    return this.validators
+    const rules = { worker: {} }
+
+    const uniqueWorkerName = withMessage('Worker name must be unique', withParams(
+      { type: 'uniqueWorkerName' },
+      function unique (value) {
+        return this.providerWorkers.filter(item => item.name === value).length === 1
+      },
+    ))
+
+    const nameRules = {
+      required,
+      maxLength: maxLength(15),
+      lowerCaseAlphaNumHyphen,
+      noStartEndHyphen,
+      uniqueWorkerName,
+    }
+    rules.worker.name = withFieldName(() => `${this.workerGroupName} Name`, nameRules)
+
+    rules.worker.minimum = withFieldName(() => `${this.workerGroupName} Autoscaler Min.`, {
+      minValue: minValue(0),
+    })
+
+    const maximumRules = {
+      minValue: minValue(0),
+      systemComponents: withMessage('Value must be greater or equal to the number of zones configured for this pool',
+        value => {
+          const hasSystemComponents = get(this.worker, ['systemComponents', 'allow'], true)
+          if (!hasSystemComponents) {
+            return true
+          }
+          const zones = get(this.worker, ['zones', 'length'], 0)
+          return value >= zones
+        }),
+    }
+    rules.worker.maximum = withFieldName(() => `${this.workerGroupName} Autoscaler Max.`, maximumRules)
+
+    rules.worker.maxSurge = withFieldName(() => `${this.workerGroupName} Max. Surge`, {
+      numberOrPercentage,
+    })
+
+    rules.selectedZones = withFieldName(() => `${this.workerGroupName} Zones`, {
+      required: requiredIf(() => this.isZonedCluster),
+    })
+
+    const volumeSizeRules = {
+      minVolumeSize: withMessage(() => `Minimum size is ${this.minimumVolumeSize}`, value => {
+        if (!this.hasVolumeSize) {
+          return true
+        }
+        if (!value) {
+          return false
+        }
+        return this.minimumVolumeSize <= convertToGi(value)
+      }),
+    }
+    rules.volumeSize = withFieldName(() => `${this.workerGroupName} Volume Size`, volumeSizeRules)
+
+    rules.machineArchitecture = withFieldName(() => `${this.workerGroupName} Machine Architecture`, {
+      required,
+    })
+
+    return rules
   },
   computed: {
-    validators () {
-      return {
-        worker: {
-          name: {
-            required,
-            maxLength: maxLength(15),
-            noStartEndHyphen, // Order is important for UI hints
-            resourceName,
-            uniqueWorkerName,
-          },
-          minimum: {
-            minValue: minValue(0),
-          },
-          maximum: {
-            minValue: minValue(0),
-            systemComponents: (value) => {
-              const hasSystemComponents = get(this.worker, 'systemComponents.allow', true)
-              if (!hasSystemComponents) {
-                return true
-              }
-              const zones = get(this.worker, 'zones.length', 0)
-              return value >= zones
-            },
-          },
-          maxSurge: {
-            numberOrPercentage,
-          },
-        },
-        selectedZones: {
-          required: requiredIf(function () {
-            return this.zonedCluster
-          }),
-        },
-        volumeSize: {
-          minVolumeSize (value) {
-            if (!this.canDefineVolumeSize) {
-              return true
-            }
-            if (!value) {
-              return false
-            }
-            return this.minimumVolumeSize <= parseSize(value)
-          },
-        },
-        machineArchitecture: {
-          required,
-        },
-      }
+    immutableZones () {
+      return this.isNewCluster || this.worker.isNew
+        ? []
+        : this.initialZones
     },
     machineTypes () {
       return this.machineTypesByCloudProfileNameAndRegionAndArchitecture({
         cloudProfileName: this.cloudProfileName,
         region: this.region,
-        architecture: this.worker.machine.architecture,
-      })
-    },
-    machineArchitectures () {
-      return this.machineArchitecturesByCloudProfileNameAndRegion({
-        cloudProfileName: this.cloudProfileName,
-        region: this.region,
-      })
-    },
-    volumeTypes () {
-      return this.volumeTypesByCloudProfileNameAndRegion({
-        cloudProfileName: this.cloudProfileName,
-        region: this.region,
+        architecture: this.machineArchitecture,
       })
     },
     volumeInCloudProfile () {
@@ -369,24 +333,22 @@ export default {
     selectedMachineType () {
       return find(this.machineTypes, ['name', this.worker.machine.type])
     },
-    canDefineVolumeSize () {
-      // Volume size can be configured by the user if the volume type is defined via a volume type (volumeInCloudProfile)
-      // not via machine type storage. If defined via storage with type not 'fixed' or if no storage is present, then the
-      // user is allowed to set a volume size
-      if (this.volumeInCloudProfile) {
-        return true
-      }
-      return get(this.selectedMachineType, 'storage.type') !== 'fixed'
+    selectedVolumeType () {
+      return find(this.volumeTypes, ['name', this.worker.volume?.type])
     },
     machineImages () {
       const machineImages = this.machineImagesByCloudProfileName(this.cloudProfileName)
-      const architecture = this.worker.machine.architecture
-      return filter(machineImages, ({ isExpired, architectures }) => !isExpired && includes(architectures, architecture))
+      return filter(machineImages, ({ isExpired, architectures }) => !isExpired && includes(architectures, this.machineArchitecture))
     },
     minimumVolumeSize () {
-      const minimumVolumeSize = parseSize(this.minimumVolumeSizeByCloudProfileNameAndRegion({ cloudProfileName: this.cloudProfileName, region: this.region }))
-
-      const defaultSize = parseSize(get(this.selectedMachineType, 'storage.size'))
+      const minimumVolumeSize = convertToGi(this.minimumVolumeSizeByMachineTypeAndVolumeType({
+        machineType: this.selectedMachineType,
+        volumeType: this.selectedVolumeType,
+      }))
+      let defaultSize = get(this.selectedMachineType, ['storage.size'])
+      if (defaultSize) {
+        defaultSize = convertToGi(defaultSize)
+      }
       if (defaultSize > 0 && defaultSize < minimumVolumeSize) {
         return defaultSize
       }
@@ -394,10 +356,10 @@ export default {
       return minimumVolumeSize
     },
     innerMin: {
-      get: function () {
+      get () {
         return Math.max(0, this.worker.minimum)
       },
-      set: function (value) {
+      set (value) {
         this.worker.minimum = Math.max(0, parseInt(value))
         if (this.innerMax < this.worker.minimum) {
           this.worker.maximum = this.worker.minimum
@@ -434,17 +396,14 @@ export default {
           return {
             value: [index, zone],
             text: zone,
-            disabled: includes(this.immutableZones, zone),
+            props: {
+              disabled: includes(this.immutableZones, zone),
+            },
           }
         })
       },
       set (zoneValues) {
-        const zones = map(zoneValues, last)
-        const removedZones = difference(this.worker.zones, zones)
-        this.worker.zones = zones
-        if (removedZones.length) {
-          this.$emit('removedZones', removedZones)
-        }
+        this.worker.zones = map(zoneValues, last)
       },
     },
     unselectedZones () {
@@ -454,7 +413,9 @@ export default {
         return {
           value: [index, zone],
           text: zone,
-          disabled: !includes(this.availableZones, zone),
+          props: {
+            disabled: !includes(this.availableZones, zone),
+          },
         }
       })
     },
@@ -463,8 +424,14 @@ export default {
       return sortBy(concat(this.selectedZones, this.unselectedZones), 'text')
     },
     zoneHint () {
+      const allAvailable = every(this.allZones, zone =>
+        includes(this.availableZones, zone),
+      )
+      if (allAvailable) {
+        return ''
+      }
       if (this.maxAdditionalZones >= this.availableZones.length) {
-        return undefined
+        return ''
       }
       if (this.maxAdditionalZones === 0) {
         return 'Your network configuration does not allow to add more zones that are not already used by this cluster'
@@ -481,7 +448,7 @@ export default {
       return find(this.machineImages, this.worker.machine.image)
     },
     machineImageCri () {
-      return get(this.selectedMachineImage, 'cri')
+      return get(this.selectedMachineImage, ['cri'])
     },
     machineArchitecture: {
       get () {
@@ -500,101 +467,59 @@ export default {
       },
       set (value) {
         this.worker.machine.type = value
-        this.setVolumeDependingOnMachineType()
         this.onInputVolumeSize()
       },
     },
+    workerGroupName () {
+      return this.worker.name ? `[Worker Group ${this.worker.name}]` : '[Worker Group]'
+    },
+    hasVolumeSize () {
+      return this.volumeInCloudProfile || this.hasCustomStorageSize
+    },
+    defaultStorageSize () {
+      return get(this.selectedMachineType, ['storage', 'size'])
+    },
   },
   mounted () {
-    const volumeSize = get(this.worker, 'volume.size')
+    const volumeSize = get(this.worker, ['volume', 'size'])
     if (volumeSize) {
       this.volumeSize = volumeSize
+      this.hasCustomStorageSize = !this.volumeInCloudProfile
     }
-    this.setVolumeDependingOnMachineType()
     this.onInputVolumeSize()
-    this.immutableZones = this.isNew ? [] : this.initialZones
   },
   methods: {
     ...mapActions(useCloudProfileStore, [
       'machineTypesByCloudProfileNameAndRegionAndArchitecture',
-      'machineArchitecturesByCloudProfileNameAndRegion',
-      'volumeTypesByCloudProfileNameAndRegion',
       'machineImagesByCloudProfileName',
-      'minimumVolumeSizeByCloudProfileNameAndRegion',
+      'minimumVolumeSizeByMachineTypeAndVolumeType',
+      'defaultMachineImageForCloudProfileNameAndMachineType',
     ]),
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
-    onInputName () {
-      this.v$.worker.name.$touch()
-    },
     onInputVolumeSize () {
-      const machineType = this.selectedMachineType
-      if (!this.canDefineVolumeSize ||
-        (!this.worker.volume?.type && this.volumeSize && get(machineType, 'storage.size') === this.volumeSize)) {
-        // this can only happen if volume type is defined via machine type storage (canDefineVolumeSize would return true otherwise)
-        // if the selected machine type does not allow to set a volume size (storage type fixed) or if the selected size is euqal
-        // to the default storage size defined for this machine type, remove volume object (contains only size information which
-        // is redundant / not allowed in this case)
-        // also the empty volume object defined by the worker skeleton gets deleted in this case
-        delete this.worker.volume
+      if (this.hasVolumeSize) {
+        set(this.worker, ['volume', 'size'], this.volumeSize)
       } else {
-        set(this.worker, 'volume.size', this.volumeSize)
+        // default size, must not write to shoot spec
+        delete this.worker.volume
       }
       this.v$.volumeSize.$touch()
-    },
-    onInputMinimum () {
-      this.v$.worker.minimum.$touch()
-    },
-    onInputMaximum () {
-      this.v$.worker.maximum.$touch()
-    },
-    onInputMaxSurge () {
-      this.v$.worker.maxSurge.$touch()
-      this.$emit('updateMaxSurge', { maxSurge: this.worker.maxSurge, id: this.worker.id })
     },
     onInputZones () {
       this.v$.selectedZones.$touch()
       this.v$.worker.maximum.$touch()
     },
-    setVolumeDependingOnMachineType () {
-      const storage = get(this.selectedMachineType, 'storage')
-      if (!storage) {
-        return
-      }
-      // machine type has storage
-      if (get(this.worker, 'volume.size')) {
-        return
-      }
-      // volume size is not defined on worker (=default storage size)
-      if (storage.type !== 'fixed') {
-        // storage can be defined, set volumeSize (=displayed size in g-size-input) to default storage size
-        this.volumeSize = storage.size
-      }
-    },
     resetWorkerMachine () {
-      this.worker.machine.type = get(head(this.machineTypes), 'name')
-      const machineImage = head(this.machineImages)
-      this.worker.machine.image = pick(machineImage, ['name', 'version'])
+      const defaultMachineType = head(this.machineTypes)
+      this.worker.machine.type = get(defaultMachineType, ['name'])
+      const defaultMachineImage = this.defaultMachineImageForCloudProfileNameAndMachineType(this.cloudProfileName, defaultMachineType)
+      this.worker.machine.image = pick(defaultMachineImage, ['name', 'version'])
     },
+    getErrorMessages,
   },
 }
 </script>
 
 <style lang="scss" scoped>
-  .regularInput {
-    max-width: 300px;
-    min-width: 230px;
-    flex: 1 1 auto;
-    padding: 12px;
-  }
-  .smallInput {
-    max-width: 120px;
-    min-width: 112px;
-    flex: 1 1 auto;
-    padding: 12px;
-  }
-
   :deep(.v-chip--disabled) {
     opacity: 1;
   }

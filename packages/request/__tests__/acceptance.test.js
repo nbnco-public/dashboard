@@ -24,12 +24,10 @@ const {
   HTTP2_HEADER_ACCEPT_ENCODING,
   HTTP2_HEADER_CONTENT_TYPE,
   HTTP2_HEADER_CONTENT_LENGTH,
-  HTTP2_HEADER_CONTENT_ENCODING
+  HTTP2_HEADER_CONTENT_ENCODING,
 } = http2.constants
 
 const nextTick = () => new Promise(resolve => process.nextTick(resolve))
-
-jest.useFakeTimers('legacy')
 
 const key = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCxLZ88tEBAu9ij
@@ -87,7 +85,7 @@ function createSecureServer ({ cert, key }) {
     server.options = {
       hostname,
       protocol,
-      port: 0
+      port: 0,
     }
     server.once('error', err => reject(err))
     server.on('stream', async (stream, headers) => {
@@ -108,7 +106,7 @@ function createSecureServer ({ cert, key }) {
         stream.respond({
           [HTTP2_HEADER_STATUS]: statusCode,
           [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain',
-          [HTTP2_HEADER_CONTENT_LENGTH]: Buffer.byteLength(body)
+          [HTTP2_HEADER_CONTENT_LENGTH]: Buffer.byteLength(body),
         })
         stream.end(body)
       } else if (path.startsWith('/gzip/')) {
@@ -116,14 +114,14 @@ function createSecureServer ({ cert, key }) {
         const headers = {
           [HTTP2_HEADER_STATUS]: statusCode,
           [HTTP2_HEADER_CONTENT_TYPE]: 'application/json',
-          [HTTP2_HEADER_CONTENT_ENCODING]: 'gzip'
+          [HTTP2_HEADER_CONTENT_ENCODING]: 'gzip',
         }
         const streams = [
           async function * generate () {
             yield JSON.stringify({ message })
           },
           zlib.createGzip(),
-          stream
+          stream,
         ]
         stream.respond(headers)
         await pipeline(streams)
@@ -131,7 +129,7 @@ function createSecureServer ({ cert, key }) {
         const message = path.substring(8)
         const headers = {
           [HTTP2_HEADER_STATUS]: statusCode,
-          [HTTP2_HEADER_CONTENT_TYPE]: 'application/json'
+          [HTTP2_HEADER_CONTENT_TYPE]: 'application/json',
         }
         const streams = [
           async function * generate () {
@@ -141,7 +139,7 @@ function createSecureServer ({ cert, key }) {
               yield JSON.stringify({ x: +i + 1, y }) + '\n'
             }
           },
-          stream
+          stream,
         ]
         if (message === 'gzip') {
           headers[HTTP2_HEADER_CONTENT_ENCODING] = 'gzip'
@@ -152,12 +150,12 @@ function createSecureServer ({ cert, key }) {
       } else {
         body = JSON.stringify({
           headers,
-          body
+          body,
         })
         stream.respond({
           [HTTP2_HEADER_STATUS]: statusCode,
           [HTTP2_HEADER_CONTENT_TYPE]: 'application/json',
-          [HTTP2_HEADER_CONTENT_LENGTH]: Buffer.byteLength(body)
+          [HTTP2_HEADER_CONTENT_LENGTH]: Buffer.byteLength(body),
         })
         stream.end(body)
       }
@@ -175,17 +173,25 @@ describe('Acceptance Tests', function () {
   let client
   let server
 
+  beforeAll(() => {
+    jest.useFakeTimers({ legacyFakeTimers: true })
+  })
+
+  afterAll(() => {
+    jest.useRealTimers()
+  })
+
   beforeEach(async () => {
     server = await createSecureServer({ cert, key })
     agent = new Agent({
       keepAliveTimeout: 3000,
       connectTimeout: 1500,
-      pingInterval: false
+      pingInterval: false,
     })
     client = new Client({
       url: server.origin,
       agent,
-      ca: cert
+      ca: cert,
     })
   })
 
@@ -202,15 +208,15 @@ describe('Acceptance Tests', function () {
           [HTTP2_HEADER_AUTHORITY]: server.options.hostname + ':' + server.options.port,
           [HTTP2_HEADER_METHOD]: method,
           [HTTP2_HEADER_PATH]: '/echo',
-          [HTTP2_HEADER_SCHEME]: 'https'
+          [HTTP2_HEADER_SCHEME]: 'https',
         }
         const url = new URL(headers[HTTP2_HEADER_SCHEME] + '://' + headers[HTTP2_HEADER_AUTHORITY] + headers[HTTP2_HEADER_PATH])
         const body = {
           headers: {
             ...headers,
-            [HTTP2_HEADER_ACCEPT_ENCODING]: 'gzip, deflate, br'
+            [HTTP2_HEADER_ACCEPT_ENCODING]: 'gzip, deflate, br',
           },
-          body: ''
+          body: '',
         }
         const response = await client.fetch('echo')
         expect(response.ok).toBe(true)
@@ -219,7 +225,7 @@ describe('Acceptance Tests', function () {
           body: undefined,
           headers: body.headers,
           method,
-          url
+          url,
         })
         expect(response.contentType).toBe('application/json')
         expect(response.contentLength).toBe(JSON.stringify(body).length.toString())
@@ -236,23 +242,22 @@ describe('Acceptance Tests', function () {
         try {
           await client.request('status/418')
         } catch (err) {
-          /* eslint-disable  jest/no-conditional-expect */
           expect(isHttpError(err, 418)).toBe(true)
           expect(err).toMatchObject({
             statusCode,
             statusMessage,
             headers: {
               [HTTP2_HEADER_CONTENT_LENGTH]: body.length.toString(),
-              [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
+              [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain',
             },
-            body
+            body,
           })
         }
       })
 
       it('should handle GET requests with content compression', async function () {
         await expect(client.request('gzip/hello')).resolves.toEqual({
-          message: 'hello'
+          message: 'hello',
         })
       })
 
@@ -265,8 +270,8 @@ describe('Acceptance Tests', function () {
             [HTTP2_HEADER_METHOD]: method,
             [HTTP2_HEADER_PATH]: '/echo',
             [HTTP2_HEADER_SCHEME]: 'https',
-            [HTTP2_HEADER_ACCEPT_ENCODING]: 'gzip, deflate, br'
-          }
+            [HTTP2_HEADER_ACCEPT_ENCODING]: 'gzip, deflate, br',
+          },
         })
       })
 
@@ -274,7 +279,7 @@ describe('Acceptance Tests', function () {
         const method = 'POST'
         const json = { foo: 'bar' }
         const headers = {
-          'X-Requested-With': 'XmlHttpRequest'
+          'X-Requested-With': 'XmlHttpRequest',
         }
         await expect(client.request('echo', { method, headers, json })).resolves.toEqual({
           body: json,
@@ -285,8 +290,8 @@ describe('Acceptance Tests', function () {
             [HTTP2_HEADER_SCHEME]: 'https',
             [HTTP2_HEADER_ACCEPT_ENCODING]: 'gzip, deflate, br',
             'x-requested-with': 'XmlHttpRequest',
-            [HTTP2_HEADER_CONTENT_TYPE]: 'application/json'
-          }
+            [HTTP2_HEADER_CONTENT_TYPE]: 'application/json',
+          },
         })
       })
     })
@@ -303,7 +308,7 @@ describe('Acceptance Tests', function () {
           { x: 2, y: 'b' },
           { x: 3, y: 'c' },
           { x: 4, y: 'd' },
-          { x: 5, y: 'e' }
+          { x: 5, y: 'e' },
         ])
       })
 
@@ -317,7 +322,7 @@ describe('Acceptance Tests', function () {
           { x: 1, y: 'g' },
           { x: 2, y: 'z' },
           { x: 3, y: 'i' },
-          { x: 4, y: 'p' }
+          { x: 4, y: 'p' },
         ])
       })
     })

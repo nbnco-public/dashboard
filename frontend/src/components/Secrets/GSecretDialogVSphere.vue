@@ -7,21 +7,18 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    vendor="vsphere"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
     create-title="Add new VMware vSphere Secret"
     replace-title="Replace VMware vSphere Secret"
   >
     <template #secret-slot>
       <div>
         <v-text-field
-          ref="vsphereUsername"
           v-model="vsphereUsername"
           color="primary"
           label="vSphere Username"
-          :error-messages="getErrorMessages('vsphereUsername')"
+          :error-messages="getErrorMessages(v$.vsphereUsername)"
           variant="underlined"
           @update:model-value="v$.vsphereUsername.$touch()"
           @blur="v$.vsphereUsername.$touch()"
@@ -32,7 +29,7 @@ SPDX-License-Identifier: Apache-2.0
           v-model="vspherePassword"
           color="primary"
           label="vSphere Password"
-          :error-messages="getErrorMessages('vspherePassword')"
+          :error-messages="getErrorMessages(v$.vspherePassword)"
           :append-icon="hideVspherePassword ? 'mdi-eye' : 'mdi-eye-off'"
           :type="hideVspherePassword ? 'password' : 'text'"
           variant="underlined"
@@ -46,7 +43,7 @@ SPDX-License-Identifier: Apache-2.0
           v-model="nsxtUsername"
           color="primary"
           label="NSX-T Username"
-          :error-messages="getErrorMessages('nsxtUsername')"
+          :error-messages="getErrorMessages(v$.nsxtUsername)"
           variant="underlined"
           @update:model-value="v$.nsxtUsername.$touch()"
           @blur="v$.nsxtUsername.$touch()"
@@ -57,7 +54,7 @@ SPDX-License-Identifier: Apache-2.0
           v-model="nsxtPassword"
           color="primary"
           label="NSX-T Password"
-          :error-messages="getErrorMessages('nsxtPassword')"
+          :error-messages="getErrorMessages(v$.nsxtPassword)"
           :append-icon="hideNsxtPassword ? 'mdi-eye' : 'mdi-eye-off'"
           :type="hideNsxtPassword ? 'password' : 'text'"
           variant="underlined"
@@ -99,25 +96,10 @@ import { required } from '@vuelidate/validators'
 import GSecretDialog from '@/components/Secrets/GSecretDialog'
 import GExternalLink from '@/components/GExternalLink.vue'
 
-import {
-  getValidationErrors,
-  setDelayedInputFocus,
-} from '@/utils'
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
 
-const validationErrors = {
-  vsphereUsername: {
-    required: 'You can\'t leave this empty.',
-  },
-  vspherePassword: {
-    required: 'You can\'t leave this empty.',
-  },
-  nsxtUsername: {
-    required: 'You can\'t leave this empty.',
-  },
-  nsxtPassword: {
-    required: 'You can\'t leave this empty.',
-  },
-}
+import { getErrorMessages } from '@/utils'
+import { withFieldName } from '@/utils/validators'
 
 export default {
   components: {
@@ -129,7 +111,7 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
   },
@@ -137,24 +119,49 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const {
+      vsphereUsername,
+      vspherePassword,
+      nsxtUsername,
+      nsxtPassword,
+    } = secretStringDataRefs({
+      vSphereUsername: 'vsphereUsername',
+      vSpherePassword: 'vspherePassword',
+      NSXTUsername: 'nsxtUsername',
+      NSXTPassword: 'nsxtPassword',
+    })
+
     return {
+      vsphereUsername,
+      vspherePassword,
+      nsxtUsername,
+      nsxtPassword,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      vsphereUsername: undefined,
-      vspherePassword: undefined,
       hideVspherePassword: true,
-      nsxtUsername: undefined,
-      nsxtPassword: undefined,
       hideNsxtPassword: true,
-      validationErrors,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      vsphereUsername: withFieldName('vSphere Username', {
+        required,
+      }),
+      vspherePassword: withFieldName('vSphere Password', {
+        required,
+      }),
+      nsxtUsername: withFieldName('NSX-T Username', {
+        required,
+      }),
+      nsxtPassword: withFieldName('NSX-T Password', {
+        required,
+      }),
+    }
   },
   computed: {
     visible: {
@@ -168,62 +175,12 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    secretData () {
-      return {
-        vsphereUsername: this.vsphereUsername,
-        vspherePassword: this.vspherePassword,
-        nsxtUsername: this.nsxtUsername,
-        nsxtPassword: this.nsxtPassword,
-      }
-    },
-    validators () {
-      const validators = {
-        vsphereUsername: {
-          required,
-        },
-        vspherePassword: {
-          required,
-        },
-        nsxtUsername: {
-          required,
-        },
-        nsxtPassword: {
-          required,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
   },
-  watch: {
-    value: function (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
   methods: {
-    reset () {
-      this.v$.$reset()
-
-      this.vsphereUsername = ''
-      this.vspherePassword = ''
-      this.nsxtUsername = ''
-      this.nsxtPassword = ''
-
-      if (!this.isCreateMode) {
-        if (this.secret.data) {
-          this.vsphereUsername = this.secret.data.vsphereUsername
-          this.nsxtUsername = this.secret.data.nsxtUsername
-        }
-        setDelayedInputFocus(this, 'vsphereUsername')
-      }
-    },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>

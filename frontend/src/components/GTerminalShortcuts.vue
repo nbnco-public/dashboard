@@ -9,7 +9,6 @@ SPDX-License-Identifier: Apache-2.0
     <g-terminal-shortcut
       v-for="shortcut in projectShortcuts"
       :key="`project-shortcut-${shortcut.id}`"
-      :shoot-item="shootItem"
       :shortcut="shortcut"
       :popper-boundaries-selector="popperBoundariesSelector"
       @add-terminal-shortcut="onAddTerminalShortcut"
@@ -49,7 +48,6 @@ SPDX-License-Identifier: Apache-2.0
     <g-terminal-shortcut
       v-for="shortcut in shortcuts"
       :key="`g-shortcut-${shortcut.id}`"
-      :shoot-item="shootItem"
       :shortcut="shortcut"
       :popper-boundaries-selector="popperBoundariesSelector"
       @add-terminal-shortcut="onAddTerminalShortcut"
@@ -97,15 +95,13 @@ import GTerminalShortcut from './GTerminalShortcut.vue'
 import GIconBase from './icons/GIconBase.vue'
 import GTerminalShortcutIcon from './icons/GTerminalShortcutIcon.vue'
 
-import {
-  filter,
-  get,
-  every,
-} from '@/lodash'
+import every from 'lodash/every'
+import get from 'lodash/get'
+import filter from 'lodash/filter'
 
 function shootSelectorFilter (shortcuts, shootItem) {
   return filter(shortcuts, shortcut => {
-    const matchLabels = get(shortcut, 'shootSelector.matchLabels')
+    const matchLabels = get(shortcut, ['shootSelector', 'matchLabels'])
     if (!matchLabels) {
       return true
     }

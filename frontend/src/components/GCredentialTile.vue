@@ -31,7 +31,7 @@ SPDX-License-Identifier: Apache-2.0
               label
               size="x-small"
               class="ml-2"
-              variant="outlined"
+              variant="tonal"
             >
               {{ phaseCaption }}
             </v-chip>
@@ -86,16 +86,15 @@ SPDX-License-Identifier: Apache-2.0
           </span>
           <span v-else>{{ phaseCaption }}</span>
         </v-tooltip>
+        <g-shoot-messages
+          v-if="type === 'certificateAuthorities'"
+          :filter="['cacertificatevalidities-constraint']"
+          small
+        />
       </div>
       <template #description>
         <div class="d-flex align-center">
           <template v-if="type === 'certificateAuthorities' && !isCACertificateValiditiesAcceptable">
-            <g-shoot-messages
-              :shoot-item="shootItem"
-              :filter="['cacertificatevalidities-constraint']"
-              small
-              class="mr-1"
-            />
             <span class="text-warning">Certificate Authorities will expire in less than one year</span>
           </template>
           <template v-else>
@@ -111,7 +110,6 @@ SPDX-License-Identifier: Apache-2.0
     <template #append>
       <g-shoot-action-rotate-credentials
         v-model="rotateCredentialsDialog"
-        :shoot-item="shootItem"
         :type="type"
         dialog
         button
@@ -121,13 +119,16 @@ SPDX-License-Identifier: Apache-2.0
 </template>
 
 <script>
+import { ref } from 'vue'
+
 import GShootActionRotateCredentials from '@/components/GShootActionRotateCredentials'
 import GTimeString from '@/components/GTimeString'
 import GShootMessages from '@/components/ShootMessages/GShootMessages'
 
-import shootStatusCredentialRotation from '@/mixins/shootStatusCredentialRotation'
+import { useShootItem } from '@/composables/useShootItem'
+import { useShootStatusCredentialRotation } from '@/composables/useShootStatusCredentialRotation'
 
-import { get } from '@/lodash'
+import get from 'lodash/get'
 
 export default {
   components: {
@@ -135,16 +136,30 @@ export default {
     GTimeString,
     GShootMessages,
   },
-  mixins: [shootStatusCredentialRotation],
   props: {
+    type: {
+      type: String,
+      required: true,
+    },
     dense: {
       type: Boolean,
       required: false,
     },
   },
-  data () {
+  setup (props) {
+    const rotateCredentialsDialog = ref(false)
+
+    const {
+      shootItem,
+      isCACertificateValiditiesAcceptable,
+    } = useShootItem()
+
     return {
-      rotateCredentialsDialog: false,
+      rotateCredentialsDialog,
+      isCACertificateValiditiesAcceptable,
+      ...useShootStatusCredentialRotation(shootItem, {
+        type: props.type,
+      }),
     }
   },
   computed: {
@@ -152,7 +167,7 @@ export default {
       return this.phaseType === 'Preparing' || this.phaseType === 'Completing' || this.phaseType === 'Rotating'
     },
     phaseCaption () {
-      return get(this.phase, 'caption', this.phaseType)
+      return get(this.phase, ['caption'], this.phaseType)
     },
     phaseColor () {
       switch (this.phaseType) {

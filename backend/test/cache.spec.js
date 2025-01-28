@@ -21,10 +21,10 @@ describe('cache', function () {
     const a = { store: { id: 1 } }
     const b = { store: { id: 2 } }
     cache.initialize({ a, b })
-    expect(stub).toBeCalledTimes(2)
+    expect(stub).toHaveBeenCalledTimes(2)
     expect(stub.mock.calls).toEqual([
       ['a', { id: 1 }],
-      ['b', { id: 2 }]
+      ['b', { id: 2 }],
     ])
   })
 
@@ -32,37 +32,42 @@ describe('cache', function () {
     const list = []
     const stub = jest.spyOn(internalCache, 'getCloudProfiles').mockReturnValue(list)
     expect(cache.getCloudProfiles()).toBe(list)
-    expect(stub).toBeCalledTimes(1)
+    expect(stub).toHaveBeenCalledTimes(1)
   })
 
   it('should dispatch "getQuotas" to internal cache', function () {
     const list = []
     const stub = jest.spyOn(internalCache, 'getQuotas').mockReturnValue(list)
     expect(cache.getQuotas()).toBe(list)
-    expect(stub).toBeCalledTimes(1)
+    expect(stub).toHaveBeenCalledTimes(1)
   })
 
   it('should dispatch "getSeeds" to internal cache', function () {
     const list = []
     const stub = jest.spyOn(internalCache, 'getSeeds').mockReturnValue(list)
     expect(cache.getSeeds()).toBe(list)
-    expect(stub).toBeCalledTimes(1)
+    expect(stub).toHaveBeenCalledTimes(1)
   })
 
   it('should dispatch "getProjects" to internal cache', function () {
     const list = []
     const stub = jest.spyOn(internalCache, 'getProjects').mockReturnValue(list)
     expect(cache.getProjects()).toBe(list)
-    expect(stub).toBeCalledTimes(1)
+    expect(stub).toHaveBeenCalledTimes(1)
   })
 
   it('should dispatch "getShoots" to internal cache', function () {
-    const object = { metadata: { uid: 1 } }
-    const list = [object]
+    const list = [
+      { metadata: { uid: 1, namespace: 'foo' } },
+      { metadata: { uid: 2, namespace: 'bar' } },
+    ]
     const store = new Store()
     store.replace(list)
     internalCache.set('shoots', store)
-    expect(cache.getShoots()).toEqual(list)
+    expect(cache.getShoots('_all')).toEqual(list)
+    expect(cache.getShoots('foo')).toEqual(list.slice(0, 1))
+    expect(cache.getShoots('bar')).toEqual(list.slice(1, 2))
+    expect(() => cache.getShoots()).toThrow(TypeError)
   })
 
   it('should dispatch "getShoot" to internal cache', function () {
@@ -72,18 +77,26 @@ describe('cache', function () {
     expect(cache.getShoot('garden-foo', 'fooShoot')).toBe(store.getByKey(1))
   })
 
+  it('should dispatch "getShootByUid" to internal cache', function () {
+    const store = new Store()
+    store.replace(fixtures.shoots.list())
+    internalCache.set('shoots', store)
+    const object = store.getByKey(1)
+    expect(cache.getShootByUid(object.metadata.uid)).toBe(object)
+  })
+
   it('should dispatch "getControllerRegistrations" to internal cache', function () {
     const list = []
     const stub = jest.spyOn(internalCache, 'getControllerRegistrations').mockReturnValue(list)
     expect(cache.getControllerRegistrations()).toBe(list)
-    expect(stub).toBeCalledTimes(1)
+    expect(stub).toHaveBeenCalledTimes(1)
   })
 
   it('should dispatch "getResourceQuotas" to internal cache', function () {
     const list = []
     const stub = jest.spyOn(internalCache, 'getResourceQuotas').mockReturnValue(list)
     expect(cache.getResourceQuotas()).toBe(list)
-    expect(stub).toBeCalledTimes(1)
+    expect(stub).toHaveBeenCalledTimes(1)
   })
 
   describe('Cache', function () {

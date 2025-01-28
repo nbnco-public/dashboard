@@ -19,11 +19,13 @@ import { useApi } from '@/composables/useApi'
 
 import {
   shortRandomString,
-  parseSize,
+  convertToGi,
   defaultCriNameByKubernetesVersion,
   isValidTerminationDate,
-  selectedImageIsNotLatest,
+  machineImageHasUpdate,
+  machineVendorHasSupportedVersion,
   UNKNOWN_EXPIRED_TIMESTAMP,
+  normalizeVersion,
 } from '@/utils'
 import { v4 as uuidv4 } from '@/utils/uuid'
 
@@ -36,33 +38,27 @@ import {
   findVendorHint,
   decorateClassificationObject,
   firstItemMatchingVersionClassification,
-  mapAccessRestrictionForInput,
-  mapAccessRestrictionForDisplay,
 } from './helper'
 
-import {
-  filter,
-  sortBy,
-  uniq,
-  map,
-  get,
-  some,
-  intersection,
-  find,
-  difference,
-  toPairs,
-  fromPairs,
-  includes,
-  isEmpty,
-  flatMap,
-  template,
-  compact,
-  head,
-  max,
-  cloneDeep,
-  sample,
-  pick,
-} from '@/lodash'
+import filter from 'lodash/filter'
+import sortBy from 'lodash/sortBy'
+import uniq from 'lodash/uniq'
+import map from 'lodash/map'
+import get from 'lodash/get'
+import set from 'lodash/set'
+import some from 'lodash/some'
+import intersection from 'lodash/intersection'
+import find from 'lodash/find'
+import difference from 'lodash/difference'
+import toPairs from 'lodash/toPairs'
+import includes from 'lodash/includes'
+import isEmpty from 'lodash/isEmpty'
+import flatMap from 'lodash/flatMap'
+import template from 'lodash/template'
+import head from 'lodash/head'
+import cloneDeep from 'lodash/cloneDeep'
+import sample from 'lodash/sample'
+import pick from 'lodash/pick'
 
 export const useCloudProfileStore = defineStore('cloudProfile', () => {
   const logger = useLogger()
@@ -82,16 +78,71 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     return list.value
   })
 
+  function flattenMachineImages (machineImages) {
+    return flatMap(machineImages, machineImage => {
+      const { name, updateStrategy = 'major' } = machineImage
+
+      const versions = []
+      for (const versionObj of machineImage.versions) {
+        if (semver.valid(versionObj.version)) {
+          versions.push(versionObj)
+          continue
+        }
+
+        const normalizedVersion = normalizeVersion(versionObj.version)
+        if (normalizedVersion) {
+          versionObj.version = normalizedVersion
+          versions.push(versionObj)
+          continue
+        }
+
+        logger.warn(`Skipped machine image ${name} as version ${versionObj.version} is not a valid semver version and cannot be normalized`)
+      }
+      versions.sort((a, b) => {
+        return semver.rcompare(a.version, b.version)
+      })
+
+      const vendorName = vendorNameFromImageName(name)
+      const vendorHint = findVendorHint(configStore.vendorHints, vendorName)
+
+      return map(versions, ({ version, expirationDate, cri, classification, architectures }) => {
+        if (isEmpty(architectures)) {
+          architectures = ['amd64'] // default if not maintained
+        }
+        return decorateClassificationObject({
+          key: name + '/' + version,
+          name,
+          version,
+          updateStrategy,
+          cri,
+          classification,
+          expirationDate,
+          vendorName,
+          icon: vendorName,
+          vendorHint,
+          architectures,
+        })
+      })
+    })
+  }
+
   async function fetchCloudProfiles () {
     const response = await api.getCloudProfiles()
-    list.value = response.data
+    setCloudProfiles(response.data)
+  }
+
+  function setCloudProfiles (cloudProfiles) {
+    for (const cloudProfile of cloudProfiles) {
+      set(cloudProfile, ['data', 'machineImages'], flattenMachineImages(get(cloudProfile, ['data', 'machineImages'])))
+    }
+    list.value = cloudProfiles
   }
 
   function isValidRegion (cloudProfile) {
     const cloudProfileName = cloudProfile.metadata.name
-    const cloudProviderKind = cloudProfile.metadata.cloudProviderKind
+    const providerType = cloudProfile.metadata.providerType
     return region => {
-      if (cloudProviderKind === 'azure') {
+      if (providerType === 'azure') {
         // Azure regions may not be zoned, need to filter these out for the dashboard
         return !!zonesByCloudProfileNameAndRegion({ cloudProfileName, region }).length
       }
@@ -101,16 +152,30 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     }
   }
 
-  const infrastructureKindList = computed(() => {
-    return uniq(map(list.value, 'metadata.cloudProviderKind'))
+  const knownProviderTypesList = ref([
+    'aws',
+    'azure',
+    'gcp',
+    'openstack',
+    'alicloud',
+    'metal',
+    'vsphere',
+    'hcloud',
+    'onmetal',
+    'ironcore',
+    'local',
+  ])
+
+  const providerTypesList = computed(() => {
+    return uniq(map(list.value, 'metadata.providerType'))
   })
 
-  const sortedInfrastructureKindList = computed(() => {
-    return intersection(['aws', 'azure', 'gcp', 'openstack', 'alicloud', 'metal', 'vsphere', 'hcloud', 'onmetal', 'local'], infrastructureKindList.value)
+  const sortedProviderTypeList = computed(() => {
+    return intersection(knownProviderTypesList.value, providerTypesList.value)
   })
 
-  function cloudProfilesByCloudProviderKind (cloudProviderKind) {
-    const predicate = item => item.metadata.cloudProviderKind === cloudProviderKind
+  function cloudProfilesByProviderType (providerType) {
+    const predicate = item => item.metadata.providerType === providerType
     const filteredCloudProfiles = filter(list.value, predicate)
     return sortBy(filteredCloudProfiles, 'metadata.name')
   }
@@ -127,7 +192,7 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
   function zonesByCloudProfileNameAndRegion ({ cloudProfileName, region }) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
     if (cloudProfile) {
-      return map(get(find(cloudProfile.data.regions, { name: region }), 'zones'), 'name')
+      return map(get(find(cloudProfile.data.regions, { name: region }), ['zones']), 'name')
     }
     return []
   }
@@ -155,25 +220,26 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     return []
   }
 
-  function minimumVolumeSizeByCloudProfileNameAndRegion ({ cloudProfileName, region, secretDomain }) {
-    const defaultMinimumSize = '20Gi'
-    const cloudProfile = cloudProfileByName(cloudProfileName)
-    if (!cloudProfile) {
-      return defaultMinimumSize
+  function minimumVolumeSizeByMachineTypeAndVolumeType ({ machineType, volumeType }) {
+    if (volumeType?.name) {
+      return volumeType.minSize ?? '0Gi'
     }
-    const seedsForCloudProfile = seedStore.seedsForCloudProfile(cloudProfile)
-    const seedsMatchingCloudProfileAndRegion = find(seedsForCloudProfile, { data: { region } })
-    return max(map(seedsMatchingCloudProfileAndRegion, 'volume.minimumSize')) || defaultMinimumSize
+
+    if (machineType?.storage) {
+      return machineType.storage.minSize ?? '0Gi'
+    }
+
+    return '0Gi'
   }
 
-  function getDefaultNodesCIDR ({ cloudProfileName }) {
+  function getDefaultNodesCIDR (cloudProfileName) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    return get(cloudProfile, 'data.providerConfig.defaultNodesCIDR', configStore.defaultNodesCIDR)
+    return get(cloudProfile, ['data', 'providerConfig', 'defaultNodesCIDR'], configStore.defaultNodesCIDR)
   }
 
   function floatingPoolsByCloudProfileNameAndRegionAndDomain ({ cloudProfileName, region, secretDomain }) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    const floatingPools = get(cloudProfile, 'data.providerConfig.constraints.floatingPools')
+    const floatingPools = get(cloudProfile, ['data', 'providerConfig', 'constraints', 'floatingPools'])
     let availableFloatingPools = filter(floatingPools, matchesPropertyOrEmpty('region', region))
     availableFloatingPools = filter(availableFloatingPools, matchesPropertyOrEmpty('domain', secretDomain))
 
@@ -195,7 +261,7 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
 
   function loadBalancerProviderNamesByCloudProfileNameAndRegion ({ cloudProfileName, region }) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    const loadBalancerProviders = get(cloudProfile, 'data.providerConfig.constraints.loadBalancerProviders')
+    const loadBalancerProviders = get(cloudProfile, ['data', 'providerConfig', 'constraints', 'loadBalancerProviders'])
     let availableLoadBalancerProviders = filter(loadBalancerProviders, matchesPropertyOrEmpty('region', region))
     const hasRegionSpecificLoadBalancerProvider = find(availableLoadBalancerProviders, lb => !!lb.region)
     if (hasRegionSpecificLoadBalancerProvider) {
@@ -211,13 +277,13 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
 
   function loadBalancerClassesByCloudProfileName (cloudProfileName) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    return get(cloudProfile, 'data.providerConfig.constraints.loadBalancerConfig.classes')
+    return get(cloudProfile, ['data', 'providerConfig', 'constraints', 'loadBalancerConfig', 'classes'])
   }
 
   function partitionIDsByCloudProfileNameAndRegion ({ cloudProfileName, region }) {
     // Partion IDs equal zones for metal infrastructure
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    if (get(cloudProfile, 'metadata.cloudProviderKind') !== 'metal') {
+    if (get(cloudProfile, ['metadata', 'providerType']) !== 'metal') {
       return
     }
     const partitionIDs = zonesByCloudProfileNameAndRegion({ cloudProfileName, region })
@@ -226,7 +292,7 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
 
   function firewallSizesByCloudProfileNameAndRegion ({ cloudProfileName, region, architecture }) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    if (get(cloudProfile, 'metadata.cloudProviderKind') !== 'metal') {
+    if (get(cloudProfile, ['metadata', 'providerType']) !== 'metal') {
       return
     }
     // Firewall Sizes equals to list of machine types for this cloud provider
@@ -236,7 +302,7 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
 
   function firewallImagesByCloudProfileName (cloudProfileName) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    return get(cloudProfile, 'data.providerConfig.firewallImages')
+    return get(cloudProfile, ['data', 'providerConfig', 'firewallImages'])
   }
 
   function firewallNetworksByCloudProfileNameAndPartitionId ({ cloudProfileName, partitionID }) {
@@ -271,14 +337,14 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     if (!cloudProfile) {
       return []
     }
-    const items = cloudProfile.data[type]
+    const items = get(cloudProfile.data, [type])
     if (!region) {
       return items
     }
     const zones = zonesByCloudProfileNameAndRegion({ cloudProfileName, region })
 
     const regionObject = find(cloudProfile.data.regions, { name: region })
-    let regionZones = get(regionObject, 'zones', [])
+    let regionZones = get(regionObject, ['zones'], [])
     regionZones = filter(regionZones, regionZone => includes(zones, regionZone.name))
     const unavailableItems = map(regionZones, zone => {
       if (type === 'machineTypes') {
@@ -292,14 +358,33 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     return filter(items, machineAndVolumeTypePredicate(unavailableItemsInAllZones))
   }
 
-  function machineTypesByCloudProfileName ({ cloudProfileName }) {
+  function machineTypesByCloudProfileName (cloudProfileName) {
     return machineTypesOrVolumeTypesByCloudProfileNameAndRegion({ type: 'machineTypes', cloudProfileName })
+  }
+
+  function getVersionExpirationWarningSeverity (options) {
+    const {
+      isExpirationWarning,
+      autoPatchEnabled,
+      updateAvailable,
+      autoUpdatePossible,
+    } = options
+    const autoPatchEnabledAndPossible = autoPatchEnabled && autoUpdatePossible
+    if (!isExpirationWarning) {
+      return autoPatchEnabledAndPossible
+        ? 'info'
+        : undefined
+    }
+    if (!updateAvailable) {
+      return 'error'
+    }
+    return 'warning'
   }
 
   function expiringWorkerGroupsForShoot (shootWorkerGroups, shootCloudProfileName, imageAutoPatch) {
     const allMachineImages = machineImagesByCloudProfileName(shootCloudProfileName)
     const workerGroups = map(shootWorkerGroups, worker => {
-      const workerImage = get(worker, 'machine.image', {})
+      const workerImage = get(worker, ['machine', 'image'], {})
       const { name, version } = workerImage
       const workerImageDetails = find(allMachineImages, { name, version })
       if (!workerImageDetails) {
@@ -309,28 +394,28 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
           workerName: worker.name,
           isValidTerminationDate: false,
           severity: 'warning',
+          supportedVersionAvailable: false,
         }
       }
 
-      const updateAvailable = selectedImageIsNotLatest(workerImageDetails, allMachineImages)
-
-      let severity
-      if (!updateAvailable) {
-        severity = 'error'
-      } else if (!imageAutoPatch) {
-        severity = 'warning'
-      } else {
-        severity = 'info'
-      }
+      const updateAvailable = machineImageHasUpdate(workerImageDetails, allMachineImages)
+      const supportedVersionAvailable = machineVendorHasSupportedVersion(workerImageDetails, allMachineImages)
+      const severity = getVersionExpirationWarningSeverity({
+        isExpirationWarning: workerImageDetails.isExpirationWarning,
+        autoPatchEnabled: imageAutoPatch,
+        updateAvailable,
+        autoUpdatePossible: updateAvailable,
+      })
 
       return {
         ...workerImageDetails,
         isValidTerminationDate: isValidTerminationDate(workerImageDetails.expirationDate),
         workerName: worker.name,
         severity,
+        supportedVersionAvailable,
       }
     })
-    return filter(workerGroups, 'expirationDate')
+    return filter(workerGroups, 'severity')
   }
 
   function machineTypesByCloudProfileNameAndRegionAndArchitecture ({ cloudProfileName, region, architecture }) {
@@ -366,104 +451,53 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     return machineTypesOrVolumeTypesByCloudProfileNameAndRegion({ type: 'volumeTypes', cloudProfileName, region })
   }
 
-  function volumeTypesByCloudProfileName ({ cloudProfileName }) {
-    return volumeTypesByCloudProfileNameAndRegion({ cloudProfileName })
+  function volumeTypesByCloudProfileName (cloudProfileName) {
+    return volumeTypesByCloudProfileNameAndRegion({ cloudProfileName, region: undefined })
   }
 
   function machineImagesByCloudProfileName (cloudProfileName) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    const machineImages = get(cloudProfile, 'data.machineImages')
-    const mapMachineImages = (machineImage) => {
-      const versions = filter(machineImage.versions, ({ version, expirationDate }) => {
-        if (!semver.valid(version)) {
-          logger.error(`Skipped machine image ${machineImage.name} as version ${version} is not a valid semver version`)
-          return false
-        }
-        return true
-      })
-      versions.sort((a, b) => {
-        return semver.rcompare(a.version, b.version)
-      })
-
-      const name = machineImage.name
-      const vendorName = vendorNameFromImageName(machineImage.name)
-      const vendorHint = findVendorHint(configStore.vendorHints, vendorName)
-
-      return map(versions, ({ version, expirationDate, cri, classification, architectures }) => {
-        if (isEmpty(architectures)) {
-          architectures = ['amd64'] // default if not maintained
-        }
-        return decorateClassificationObject({
-          key: name + '/' + version,
-          name,
-          version,
-          cri,
-          classification,
-          expirationDate,
-          vendorName,
-          icon: vendorName,
-          vendorHint,
-          architectures,
-        })
-      })
-    }
-
-    return flatMap(machineImages, mapMachineImages)
+    return get(cloudProfile, ['data', 'machineImages'])
   }
 
-  function accessRestrictionNoItemsTextForCloudProfileNameAndRegion ({ cloudProfileName: cloudProfile, region }) {
-    const noItemsText = get(configStore, 'accessRestriction.noItemsText', 'No access restriction options available for region ${region}') // eslint-disable-line no-template-curly-in-string
+  function accessRestrictionNoItemsTextForCloudProfileNameAndRegion ({ cloudProfileName, region }) {
+    const defaultNoItemsText = 'No access restriction options available for region ${region}' // eslint-disable-line no-template-curly-in-string
+    const noItemsText = get(configStore, ['accessRestriction', 'noItemsText'], defaultNoItemsText)
 
-    const compiled = template(noItemsText)
-    return compiled({
+    return template(noItemsText)({
       region,
-      cloudProfile,
+      cloudProfile: cloudProfileName,
     })
   }
 
   function accessRestrictionDefinitionsByCloudProfileNameAndRegion ({ cloudProfileName, region }) {
-    if (!cloudProfileName) {
-      return undefined
-    }
-    if (!region) {
-      return undefined
+    if (!cloudProfileName || !region) {
+      return []
     }
 
-    const labels = labelsByCloudProfileNameAndRegion({ cloudProfileName, region })
-    if (isEmpty(labels)) {
-      return undefined
+    const allowedAccessRestrictions = accessRestrictionsByCloudProfileNameAndRegion({ cloudProfileName, region })
+    if (isEmpty(allowedAccessRestrictions)) {
+      return []
     }
 
-    const items = get(configStore, 'accessRestriction.items')
+    const allowedAccessRestrictionNames = allowedAccessRestrictions.map(ar => ar.name)
+
+    const items = get(configStore, ['accessRestriction', 'items'])
     return filter(items, ({ key }) => {
-      if (!key) {
-        return false
-      }
-      return labels[key] === 'true'
+      return key && allowedAccessRestrictionNames.includes(key)
     })
   }
 
-  function accessRestrictionsForShootByCloudProfileNameAndRegion ({ shootResource, cloudProfileName, region }) {
-    const definitions = accessRestrictionDefinitionsByCloudProfileNameAndRegion({ cloudProfileName, region })
-
-    let accessRestrictionsMap = map(definitions, definition => mapAccessRestrictionForInput(definition, shootResource))
-    accessRestrictionsMap = compact(accessRestrictionsMap)
-    return fromPairs(accessRestrictionsMap)
-  }
-
-  function selectedAccessRestrictionsForShootByCloudProfileNameAndRegion ({ shootResource, cloudProfileName, region }) {
-    const definitions = accessRestrictionDefinitionsByCloudProfileNameAndRegion({ cloudProfileName, region })
-    const accessRestrictions = accessRestrictionsForShootByCloudProfileNameAndRegion({ shootResource, cloudProfileName, region })
-
-    return compact(map(definitions, definition => mapAccessRestrictionForDisplay({ definition, accessRestriction: accessRestrictions[definition.key] })))
-  }
-
-  function labelsByCloudProfileNameAndRegion ({ cloudProfileName, region }) {
+  function accessRestrictionsByCloudProfileNameAndRegion ({ cloudProfileName, region }) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    if (cloudProfile) {
-      return get(find(cloudProfile.data.regions, { name: region }), 'labels')
+    if (!cloudProfile) {
+      return []
     }
-    return {}
+    const regionData = find(cloudProfile.data.regions, [['name'], region])
+    if (!regionData) {
+      return []
+    }
+    return get(regionData, ['accessRestrictions'], [])
   }
 
   function defaultMachineImageForCloudProfileNameAndMachineType (cloudProfileName, machineType) {
@@ -474,10 +508,10 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
 
   function kubernetesVersions (cloudProfileName) {
     const cloudProfile = cloudProfileByName(cloudProfileName)
-    const allVersions = get(cloudProfile, 'data.kubernetes.versions', [])
+    const allVersions = get(cloudProfile, ['data', 'kubernetes', 'versions'], [])
     const validVersions = filter(allVersions, ({ expirationDate, version }) => {
       if (!semver.valid(version)) {
-        logger.error(`Skipped Kubernetes version ${version} as it is not a valid semver version`)
+        logger.info(`Skipped Kubernetes version ${version} as it is not a valid semver version`)
         return false
       }
       return true
@@ -511,10 +545,12 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     const newerVersionsForShoot = filter(validVersions, ({ version }) => semver.gt(version, shootVersion))
     for (const version of newerVersionsForShoot) {
       const diff = semver.diff(version.version, shootVersion)
+      /* eslint-disable security/detect-object-injection */
       if (!newerVersions[diff]) {
         newerVersions[diff] = []
       }
       newerVersions[diff].push(version)
+      /* eslint-enable security/detect-object-injection */
     }
     newerVersions = newerVersionsForShoot.length ? newerVersions : null
     availableKubernetesUpdatesCache.set(key, newerVersions)
@@ -524,8 +560,8 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
 
   function kubernetesVersionIsNotLatestPatch (kubernetesVersion, cloudProfileName) {
     const allVersions = kubernetesVersions(cloudProfileName)
-    return some(allVersions, ({ version, isPreview }) => {
-      return semver.diff(version, kubernetesVersion) === 'patch' && semver.gt(version, kubernetesVersion) && !isPreview
+    return some(allVersions, ({ version, isSupported }) => {
+      return semver.diff(version, kubernetesVersion) === 'patch' && semver.gt(version, kubernetesVersion) && isSupported
     })
   }
 
@@ -534,10 +570,27 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     if (kubernetesVersionIsNotLatestPatch(kubernetesVersion, cloudProfileName)) {
       return true
     }
-    const versionMinorVersion = semver.minor(kubernetesVersion)
-    return some(allVersions, ({ version, isPreview }) => {
-      return semver.minor(version) === versionMinorVersion + 1 && !isPreview
-    })
+
+    const nextMinorVersion = semver.minor(kubernetesVersion) + 1
+    let hasNextMinorVersion = false
+    let hasNewerSupportedMinorVersion = false
+
+    for (const { version, isSupported } of allVersions) {
+      const minorVersion = semver.minor(version)
+      if (minorVersion === nextMinorVersion) {
+        // we can only upgrade one version at a time, therefore we only check if the next version exists
+        // as for the current upgrade this is the only relevant version
+        hasNextMinorVersion = true
+      }
+      if (minorVersion >= nextMinorVersion && isSupported) {
+        // if no newer supported exists (no need to be next minor) there is no update path
+        // this will result in an error in case the current version is about to expire
+        // we show this as error information to the user (this should not happen, likely a misconfiguration)
+        hasNewerSupportedMinorVersion = true
+      }
+    }
+
+    return hasNextMinorVersion && hasNewerSupportedMinorVersion
   }
 
   function kubernetesVersionExpirationForShoot (shootK8sVersion, shootCloudProfileName, k8sAutoPatch) {
@@ -551,21 +604,18 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
         severity: 'warning',
       }
     }
-    if (!version.expirationDate) {
-      return undefined
-    }
 
     const patchAvailable = kubernetesVersionIsNotLatestPatch(shootK8sVersion, shootCloudProfileName)
     const updatePathAvailable = kubernetesVersionUpdatePathAvailable(shootK8sVersion, shootCloudProfileName)
 
-    let severity
-    if (!updatePathAvailable) {
-      severity = 'error'
-    } else if ((!k8sAutoPatch && patchAvailable) || !patchAvailable) {
-      severity = 'warning'
-    } else if (k8sAutoPatch && patchAvailable) {
-      severity = 'info'
-    } else {
+    const severity = getVersionExpirationWarningSeverity({
+      isExpirationWarning: version.isExpirationWarning,
+      autoPatchEnabled: k8sAutoPatch,
+      updateAvailable: updatePathAvailable,
+      autoUpdatePossible: patchAvailable,
+    })
+
+    if (!severity) {
       return undefined
     }
 
@@ -586,9 +636,9 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     const volumeTypesForZone = volumeTypesByCloudProfileNameAndRegion({ cloudProfileName, region })
     const volumeType = head(volumeTypesForZone) || {}
     const machineImage = defaultMachineImageForCloudProfileNameAndMachineType(cloudProfileName, machineType)
-    const minVolumeSize = minimumVolumeSizeByCloudProfileNameAndRegion({ cloudProfileName, region })
+    const minVolumeSize = minimumVolumeSizeByMachineTypeAndVolumeType({ machineType, volumeType })
 
-    const defaultVolumeSize = parseSize(minVolumeSize) <= parseSize('50Gi') ? '50Gi' : minVolumeSize
+    const defaultVolumeSize = convertToGi(minVolumeSize) <= convertToGi('50Gi') ? '50Gi' : minVolumeSize
     const worker = {
       id,
       name,
@@ -602,7 +652,7 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
       },
       zones,
       cri: {
-        name: defaultCriNameByKubernetesVersion(map(machineImage.cri, 'name'), kubernetesVersion),
+        name: defaultCriNameByKubernetesVersion(map(machineImage?.cri, 'name'), kubernetesVersion),
       },
       isNew: true,
     }
@@ -610,14 +660,6 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
       worker.volume = {
         type: volumeType.name,
         size: defaultVolumeSize,
-      }
-    } else if (!machineType.storage) {
-      worker.volume = {
-        size: defaultVolumeSize,
-      }
-    } else if (machineType.storage.type !== 'fixed') {
-      worker.volume = {
-        size: machineType.storage.size,
       }
     }
     return worker
@@ -627,9 +669,10 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     list,
     isInitial,
     cloudProfileList,
+    setCloudProfiles,
     fetchCloudProfiles,
-    cloudProfilesByCloudProviderKind,
-    sortedInfrastructureKindList,
+    cloudProfilesByProviderType,
+    sortedProviderTypeList,
     cloudProfileByName,
     regionsWithSeedByCloudProfileName,
     regionsWithoutSeedByCloudProfileName,
@@ -651,9 +694,9 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     volumeTypesByCloudProfileNameAndRegion,
     volumeTypesByCloudProfileName,
     defaultMachineImageForCloudProfileNameAndMachineType,
-    minimumVolumeSizeByCloudProfileNameAndRegion,
-    selectedAccessRestrictionsForShootByCloudProfileNameAndRegion,
-    labelsByCloudProfileNameAndRegion,
+    minimumVolumeSizeByMachineTypeAndVolumeType,
+    accessRestrictionsByCloudProfileNameAndRegion,
+    accessRestrictionDefinitionsByCloudProfileNameAndRegion,
     accessRestrictionNoItemsTextForCloudProfileNameAndRegion,
     kubernetesVersions,
     sortedKubernetesVersions,
@@ -662,8 +705,6 @@ export const useCloudProfileStore = defineStore('cloudProfile', () => {
     kubernetesVersionUpdatePathAvailable,
     kubernetesVersionExpirationForShoot,
     seedsByCloudProfileName,
-    accessRestrictionDefinitionsByCloudProfileNameAndRegion,
-    accessRestrictionsForShootByCloudProfileNameAndRegion,
     loadBalancerClassesByCloudProfileName,
     generateWorker,
     machineImagesByCloudProfileName,

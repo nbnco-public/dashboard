@@ -12,7 +12,7 @@ SPDX-License-Identifier: Apache-2.0
       label="Image"
       hint="Image to be used for the Container"
       persistent-hint
-      :error-messages="getErrorMessages('containerImage')"
+      :error-messages="getErrorMessages(v$.containerImage)"
       variant="underlined"
       @update:model-value="v$.containerImage.$touch()"
       @blur="v$.containerImage.$touch()"
@@ -102,7 +102,7 @@ SPDX-License-Identifier: Apache-2.0
         :model-value="true"
         type="info"
         color="primary"
-        variant="outlined"
+        variant="tonal"
       >
         <strong>Terminal will be running in an untrusted environment!</strong><br>
         Do not enter credentials or sensitive data within the terminal session that cluster owners should not have access to, as the terminal will be running on one of the worker nodes.
@@ -112,6 +112,7 @@ SPDX-License-Identifier: Apache-2.0
 </template>
 
 <script>
+import { toRefs } from 'vue'
 import { useVuelidate } from '@vuelidate/core'
 import { mapState } from 'pinia'
 import { required } from '@vuelidate/validators'
@@ -120,69 +121,62 @@ import { useAuthnStore } from '@/store/authn'
 
 import GTimeString from '@/components/GTimeString.vue'
 
-import { getValidationErrors } from '@/utils'
+import { useTerminalConfig } from '@/composables/useTerminalConfig'
 
-const validationErrors = {
-  containerImage: {
-    required: 'You can\'t leave this empty.',
-  },
-}
+import { getErrorMessages } from '@/utils'
+import { withFieldName } from '@/utils/validators'
 
 export default {
   components: {
     GTimeString,
   },
-  inject: [
-    'node',
-    'containerImage',
-    'shootNodes',
-    'privilegedMode',
-    'runtime',
-  ],
   props: {
     runtimeSettingsHidden: {
       type: Boolean,
       default: false,
     },
   },
-  setup () {
-    return {
-      v$: useVuelidate(),
+  setup (props) {
+    const { state } = useTerminalConfig()
+    const {
+      node,
+      containerImage,
+      shootNodes,
+      privilegedMode,
+      runtime,
+    } = toRefs(state)
+
+    const rules = {
+      containerImage: withFieldName('Terminal Container Image', {
+        required,
+      }),
     }
-  },
-  data () {
+
     return {
-      validationErrors,
+      v$: useVuelidate(rules, { containerImage }),
+      node,
+      containerImage,
+      shootNodes,
+      privilegedMode,
+      runtime,
     }
-  },
-  validations () {
-    return this.validators
   },
   computed: {
     ...mapState(useAuthnStore, [
       'isAdmin',
     ]),
-    validators () {
-      return {
-        containerImage: {
-          required,
-        },
-      }
-    },
     shootNodesInternal () {
       return this.runtime === 'shoot' ? this.shootNodes : []
     },
   },
   methods: {
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
     isAutoSelectNodeItem (item) {
       return this.isAutoSelectNode(item.raw.data?.kubernetesHostname)
     },
     isAutoSelectNode (hostname) {
       return hostname === '<AUTO-SELECT>'
     },
+    getErrorMessages,
   },
 }
 </script>

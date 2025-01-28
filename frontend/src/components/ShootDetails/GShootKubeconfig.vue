@@ -12,7 +12,7 @@ SPDX-License-Identifier: Apache-2.0
         color="primary"
       />
     </template>
-    <g-list-item-content v-if="isGardenloginType">
+    <g-list-item-content>
       Kubeconfig - Gardenlogin
       <template #description>
         <span
@@ -27,48 +27,25 @@ SPDX-License-Identifier: Apache-2.0
         </span>
       </template>
     </g-list-item-content>
-    <g-list-item-content v-else>
-      Kubeconfig - Static Token
-      <template #description>
-        <span v-if="!shootEnableStaticTokenKubeconfig">
-          Static token kubeconfig is disabled for this cluster
-        </span>
-        <span v-else-if="!isKubeconfigAvailable">
-          Static token kubeconfig currently not available
-        </span>
-        <span
-          v-else
-          class="wrap-text"
-        >
-          Contains static token credential.
-          Not recommended, consider disabling the static token kubeconfig
-        </span>
-      </template>
-    </g-list-item-content>
     <template #append>
-      <g-gardenlogin-info v-if="isGardenloginType" />
+      <g-gardenlogin-info :shoot-namespace="shootNamespace" />
       <template v-if="isKubeconfigAvailable">
         <g-action-button
           icon="mdi-download"
           tooltip="Download Kubeconfig"
-          @click.stop="onDownload"
+          @click="onDownload"
         />
         <g-copy-btn :clipboard-text="kubeconfig" />
         <g-action-button
-          :icon="kubeconfigVisibilityIcon"
-          :tooltip="kubeconfigVisibilityTitle"
-          @click.stop="kubeconfigExpansionPanel = !kubeconfigExpansionPanel"
+          :icon="visibilityIcon"
+          :tooltip="visibilityTitle"
+          @click="toggleKubeconfig"
         />
       </template>
-
-      <g-static-token-kubeconfig-configuration
-        v-if="!isGardenloginType"
-        :shoot-item="shootItem"
-      />
     </template>
   </g-list-item>
   <g-list-item
-    v-if="kubeconfigExpansionPanel"
+    v-if="expansionPanel"
     key="expansion-gardenlogin-kubeconfig"
   >
     <g-list-item-content>
@@ -82,7 +59,11 @@ SPDX-License-Identifier: Apache-2.0
 </template>
 
 <script>
+import { ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import download from 'downloadjs'
+
+import { useAuthzStore } from '@/store/authz'
 
 import GListItem from '@/components/GListItem.vue'
 import GListItemContent from '@/components/GListItemContent.vue'
@@ -90,9 +71,8 @@ import GActionButton from '@/components/GActionButton.vue'
 import GCopyBtn from '@/components/GCopyBtn.vue'
 import GCodeBlock from '@/components/GCodeBlock.vue'
 import GGardenloginInfo from '@/components/GGardenloginInfo.vue'
-import GStaticTokenKubeconfigConfiguration from '@/components/GStaticTokenKubeconfigConfiguration.vue'
 
-import { shootItem } from '@/mixins/shootItem'
+import { useShootItem } from '@/composables/useShootItem'
 
 export default {
   components: {
@@ -102,22 +82,35 @@ export default {
     GCopyBtn,
     GCodeBlock,
     GGardenloginInfo,
-    GStaticTokenKubeconfigConfiguration,
   },
-  mixins: [shootItem],
   props: {
     showListIcon: {
       type: Boolean,
       default: false,
     },
-    type: {
-      type: String,
-      default: 'gardenlogin',
-    },
   },
-  data () {
+  setup () {
+    const authzStore = useAuthzStore()
+    const {
+      canGetSecrets,
+    } = storeToRefs(authzStore)
+
+    const {
+      shootNamespace,
+      shootName,
+      shootProjectName,
+      shootInfo,
+    } = useShootItem()
+
+    const expansionPanel = ref(false)
+
     return {
-      kubeconfigExpansionPanel: false,
+      canGetSecrets,
+      shootNamespace,
+      shootName,
+      shootProjectName,
+      shootInfo,
+      expansionPanel,
     }
   },
   computed: {
@@ -125,43 +118,36 @@ export default {
       return this.showListIcon ? 'mdi-file' : ''
     },
     kubeconfig () {
-      return this.isGardenloginType
-        ? this.shootInfo?.kubeconfigGardenlogin
-        : this.shootInfo?.kubeconfig
+      return this.shootInfo?.kubeconfigGardenlogin
     },
     isKubeconfigAvailable () {
       return !!this.kubeconfig
     },
-    kubeconfigVisibilityIcon () {
-      return this.kubeconfigExpansionPanel ? 'mdi-eye-off' : 'mdi-eye'
+    visibilityIcon () {
+      return this.expansionPanel ? 'mdi-eye-off' : 'mdi-eye'
     },
-    kubeconfigVisibilityTitle () {
-      return this.kubeconfigExpansionPanel ? 'Hide Kubeconfig' : 'Show Kubeconfig'
+    visibilityTitle () {
+      return this.expansionPanel ? 'Hide Kubeconfig' : 'Show Kubeconfig'
     },
-    isGardenloginType () {
-      return this.type === 'gardenlogin'
-    },
-    getQualifiedName () {
-      const prefix = this.isGardenloginType ? 'kubeconfig-gardenlogin' : 'kubeconfig'
-      return `${prefix}--${this.shootProjectName}--${this.shootName}.yaml`
+    qualifiedName () {
+      return `kubeconfig-gardenlogin--${this.shootProjectName}--${this.shootName}.yaml`
     },
   },
   watch: {
-    kubeconfig (value) {
+    kubeconfig () {
       this.reset()
     },
   },
   methods: {
     toggleKubeconfig () {
-      this.kubeconfigExpansionPanel = !this.kubeconfigExpansionPanel
+      this.expansionPanel = !this.expansionPanel
     },
     reset () {
-      this.kubeconfigExpansionPanel = false
+      this.expansionPanel = false
     },
     onDownload () {
-      const kubeconfig = this.kubeconfig
-      if (kubeconfig) {
-        download(kubeconfig, this.getQualifiedName, 'text/yaml')
+      if (this.kubeconfig) {
+        download(this.kubeconfig, this.qualifiedName, 'text/yaml')
       }
     },
   },

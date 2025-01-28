@@ -8,24 +8,22 @@
 
 const assert = require('assert').strict
 const crypto = require('crypto')
-const { split, join, some, every, includes, head, chain, pick } = require('lodash')
+const { split, join, includes, head, chain, pick } = require('lodash')
 const { Issuer, custom, generators, TokenSet } = require('openid-client')
 const pRetry = require('p-retry')
 const pTimeout = require('p-timeout')
 const { authentication, authorization } = require('../services')
 const createError = require('http-errors')
 const logger = require('../logger')
-const { sessionSecret, oidc = {} } = require('../config')
+const { sessionSecrets, oidc = {} } = require('../config')
 
 const {
-  encodeState,
-  decodeState,
   sign,
   verify,
   decode,
   encrypt,
-  decrypt
-} = require('./jose')(sessionSecret)
+  decrypt,
+} = require('./jose')(sessionSecrets)
 
 const now = () => Math.floor(Date.now() / 1000)
 const digest = (data, n = 7) => {
@@ -42,7 +40,8 @@ const {
   COOKIE_TOKEN,
   COOKIE_SIGNATURE,
   COOKIE_CODE_VERIFIER,
-  GARDENER_AUDIENCE
+  COOKIE_STATE,
+  GARDENER_AUDIENCE,
 } = require('./constants')
 
 const {
@@ -55,23 +54,15 @@ const {
   sessionLifetime = 86400,
   rejectUnauthorized = true,
   ca,
-  clockTolerance = 15
+  clockTolerance = 15,
 } = oidc
 const responseTypes = ['code']
 const httpOptions = {
   followRedirect: false,
-  rejectUnauthorized
+  rejectUnauthorized,
 }
 if (ca) {
   httpOptions.ca = ca
-}
-
-const hasHttpsProtocol = uri => /^https:/.test(uri)
-const secure = some(redirectUris, hasHttpsProtocol)
-if (secure) {
-  assert.ok(every(redirectUris, hasHttpsProtocol), 'All \'redirect_uris\' must have the same protocol')
-} else if (process.env.NODE_ENV === 'production') {
-  logger.warn('The Gardener Dashboard is running in production but you don\'t use Transport Layer Security (TLS) to secure the connection and the data')
 }
 
 let clientPromise
@@ -104,7 +95,7 @@ function discoverClient (url) {
     const options = {
       client_id: clientId,
       redirect_uris: redirectUris,
-      response_types: responseTypes
+      response_types: responseTypes,
     }
     if (clientSecret) {
       options.client_secret = clientSecret
@@ -119,7 +110,7 @@ function discoverClient (url) {
     forever: true,
     minTimeout: 1000,
     maxTimeout: 60 * 1000,
-    randomize: true
+    randomize: true,
   })
 }
 
@@ -162,9 +153,16 @@ async function authorizationUrl (req, res) {
   const redirectPath = frontendRedirectUrl.pathname + frontendRedirectUrl.search
   const redirectOrigin = frontendRedirectUrl.origin
   const backendRedirectUri = getBackendRedirectUri(redirectOrigin)
-  const state = encodeState({
+  const state = generators.state()
+  res.cookie(COOKIE_STATE, {
     redirectPath,
-    redirectOrigin
+    redirectOrigin,
+    state,
+  }, {
+    secure: true,
+    httpOnly: true,
+    maxAge: 180_000, // cookie will be removed after 3 minutes
+    sameSite: 'Lax',
   })
   const client = await exports.getIssuerClient()
   if (!includes(redirectUris, backendRedirectUri)) {
@@ -173,17 +171,16 @@ async function authorizationUrl (req, res) {
   const params = {
     redirect_uri: backendRedirectUri,
     state,
-    scope
+    scope,
   }
   if (usePKCE) {
     const codeChallengeMethod = getCodeChallengeMethod(client)
     const codeVerifier = generators.codeVerifier()
     res.cookie(COOKIE_CODE_VERIFIER, codeVerifier, {
-      secure,
+      secure: true,
       httpOnly: true,
-      maxAge: 300000, // cookie will be removed after 5 minutes
+      maxAge: 180_000, // cookie will be removed after 3 minutes
       sameSite: 'Lax',
-      path: '/auth/callback'
     })
     switch (codeChallengeMethod) {
       case 'S256':
@@ -200,7 +197,7 @@ async function authorizationUrl (req, res) {
 
 async function authorizeToken (req, res) {
   const idToken = chain(req.body)
-    .get('token')
+    .get(['token'])
     .trim()
     .value()
   const payload = {}
@@ -214,7 +211,7 @@ async function createAccessToken (payload, idToken) {
   const user = { auth: { bearer: idToken } }
   const results = await Promise.allSettled([
     authentication.isAuthenticated({ token: idToken }),
-    authorization.isAdmin(user)
+    authorization.isAdmin(user),
   ])
   // throw an error if any promise has been rejected
   for (const { status, reason: err } of results) {
@@ -224,13 +221,13 @@ async function createAccessToken (payload, idToken) {
   }
   const [
     { value: { username, groups } },
-    { value: isAdmin }
+    { value: isAdmin },
   ] = results
   Object.assign(payload, {
     id: username,
     groups,
     aud: [GARDENER_AUDIENCE],
-    isAdmin
+    isAdmin,
   })
   const idTokenPayload = decode(idToken)
   if (idTokenPayload) {
@@ -254,15 +251,15 @@ async function setCookies (res, tokenSet) {
   const accessToken = tokenSet.access_token
   const [header, payload, signature] = split(accessToken, '.')
   res.cookie(COOKIE_HEADER_PAYLOAD, join([header, payload], '.'), {
-    secure,
+    secure: true,
     expires: undefined,
-    sameSite: 'Lax'
+    sameSite: 'Lax',
   })
   res.cookie(COOKIE_SIGNATURE, signature, {
-    secure,
+    secure: true,
     httpOnly: true,
     expires: undefined,
-    sameSite: 'Lax'
+    sameSite: 'Lax',
   })
   const values = [tokenSet.id_token]
   if (tokenSet.refresh_token) {
@@ -270,28 +267,40 @@ async function setCookies (res, tokenSet) {
   }
   const encryptedValues = await encrypt(values.join(','))
   res.cookie(COOKIE_TOKEN, encryptedValues, {
-    secure,
+    secure: true,
     httpOnly: true,
     expires: undefined,
-    sameSite: 'Lax'
+    sameSite: 'Lax',
   })
   return accessToken
 }
 
 async function authorizationCallback (req, res) {
-  const { code, state } = req.query
-  const parameters = { code }
+  const options = {
+    secure: true,
+    path: '/',
+  }
+  let stateObject = {}
+  if (COOKIE_STATE in req.cookies) {
+    stateObject = req.cookies[COOKIE_STATE] // eslint-disable-line security/detect-object-injection -- COOKIE_STATE is a constant
+    res.clearCookie(COOKIE_STATE, options)
+  }
   const {
     redirectPath,
-    redirectOrigin
-  } = decodeState(state)
+    redirectOrigin,
+    state,
+  } = stateObject
+
+  const client = await exports.getIssuerClient()
+  const parameters = client.callbackParams(req)
   const backendRedirectUri = getBackendRedirectUri(redirectOrigin)
   const checks = {
-    response_type: 'code'
+    response_type: 'code',
+    state,
   }
   if (COOKIE_CODE_VERIFIER in req.cookies) {
-    checks.code_verifier = req.cookies[COOKIE_CODE_VERIFIER]
-    res.clearCookie(COOKIE_CODE_VERIFIER)
+    checks.code_verifier = req.cookies[COOKIE_CODE_VERIFIER] // eslint-disable-line security/detect-object-injection -- COOKIE_CODE_VERIFIER is a constant
+    res.clearCookie(COOKIE_CODE_VERIFIER, options)
   }
   const tokenSet = await authorizationCodeExchange(backendRedirectUri, parameters, checks)
   await setCookies(res, tokenSet)
@@ -307,12 +316,18 @@ function isXmlHttpRequest ({ headers = {} }) {
 }
 
 function getAccessToken (cookies) {
-  const [header, payload] = split(cookies[COOKIE_HEADER_PAYLOAD], '.')
-  const signature = cookies[COOKIE_SIGNATURE]
+  const headerAndPayload = cookies[COOKIE_HEADER_PAYLOAD] // eslint-disable-line security/detect-object-injection -- COOKIE_HEADER_PAYLOAD is a constant
+  const [header, payload] = split(headerAndPayload, '.')
+  const signature = cookies[COOKIE_SIGNATURE] // eslint-disable-line security/detect-object-injection -- COOKIE_SIGNATURE is a constant
   if (header && payload && signature) {
     return join([header, payload, signature], '.')
   }
   throw createError(401, 'No authorization token was found', { code: 'ERR_JWT_NOT_FOUND' })
+}
+
+function getRefreshAt (tokenSet) {
+  const user = decode(tokenSet.id_token)
+  return user?.exp ?? tokenSet.expires_at
 }
 
 async function verifyAccessToken (token) {
@@ -346,11 +361,20 @@ function csrfProtection (req) {
 
 async function getTokenSet (cookies) {
   const accessToken = getAccessToken(cookies)
-  const encryptedValues = cookies[COOKIE_TOKEN]
+  const encryptedValues = cookies[COOKIE_TOKEN] // eslint-disable-line security/detect-object-injection -- COOKIE_TOKEN is a constant
   if (!encryptedValues) {
     throw createError(401, 'No bearer token found in request', { code: 'ERR_JWE_NOT_FOUND' })
   }
-  const values = await decrypt(encryptedValues)
+  let values = ''
+  try {
+    values = await decrypt(encryptedValues)
+  } catch (err) {
+    const {
+      message,
+      code = 'ERR_JWE_DECRYPTION_FAILED',
+    } = err
+    throw createError(401, message, { code })
+  }
   if (!values) {
     throw createError(401, 'The decrypted bearer token must not be empty', { code: 'ERR_JWE_DECRYPTION_FAILED' })
   }
@@ -358,7 +382,7 @@ async function getTokenSet (cookies) {
   const tokenSet = new TokenSet({
     id_token: idToken,
     refresh_token: refreshToken,
-    access_token: accessToken
+    access_token: accessToken,
   })
   return tokenSet
 }
@@ -376,7 +400,7 @@ async function authorizationCodeExchange (redirectUri, parameters, checks) {
        * of the access_token will be the configured sessionLifetime.
        */
       payload.exp = iat + sessionLifetime
-      payload.refresh_at = tokenSet.expires_at
+      payload.refresh_at = getRefreshAt(tokenSet)
       payload.rti = digest(tokenSet.refresh_token)
       logger.debug('Created TokenSet (%s)', payload.rti)
     }
@@ -404,7 +428,7 @@ async function refreshTokenSet (tokenSet) {
     const rti = payload.rti
     payload.rti = digest(tokenSet.refresh_token)
     logger.debug('Refreshed TokenSet (%s <- %s)', payload.rti, rti)
-    payload.refresh_at = tokenSet.expires_at
+    payload.refresh_at = getRefreshAt(tokenSet)
     tokenSet.access_token = await createAccessToken(payload, tokenSet.id_token)
     return tokenSet
   } catch (err) {
@@ -440,14 +464,14 @@ function authenticate (options = {}) {
       const tokenSet = await getTokenSet(req.cookies)
       const user = await verifyAccessToken(tokenSet.access_token)
       const auth = Object.freeze({
-        bearer: tokenSet.id_token
+        bearer: tokenSet.id_token,
       })
       Object.defineProperty(user, 'auth', {
         value: auth,
-        enumerable: true
+        enumerable: true,
       })
       Object.defineProperty(user, 'client', {
-        value: options.createClient({ auth })
+        value: options.createClient({ auth }),
       })
       req.user = user
       next()
@@ -459,9 +483,13 @@ function authenticate (options = {}) {
 }
 
 function clearCookies (res) {
-  res.clearCookie(COOKIE_HEADER_PAYLOAD)
-  res.clearCookie(COOKIE_SIGNATURE)
-  res.clearCookie(COOKIE_TOKEN)
+  const options = {
+    secure: true,
+    path: '/',
+  }
+  res.clearCookie(COOKIE_HEADER_PAYLOAD, options)
+  res.clearCookie(COOKIE_SIGNATURE, options)
+  res.clearCookie(COOKIE_TOKEN, options)
 }
 
 exports = module.exports = {
@@ -470,8 +498,6 @@ exports = module.exports = {
   COOKIE_HEADER_PAYLOAD,
   COOKIE_SIGNATURE,
   COOKIE_TOKEN,
-  encodeState,
-  decodeState,
   sign,
   decode,
   verify,
@@ -483,5 +509,5 @@ exports = module.exports = {
   authorizationCallback,
   refreshToken,
   authorizeToken,
-  authenticate
+  authenticate,
 }

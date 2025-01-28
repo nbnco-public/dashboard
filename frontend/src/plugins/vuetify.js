@@ -5,7 +5,7 @@
 //
 
 // Material Design Icons Webfont
-import '@mdi/font/css/materialdesignicons.css'
+import '@/sass/materialdesignicons.scss'
 
 // Styles
 import 'unfonts.css'
@@ -13,7 +13,6 @@ import 'vuetify/styles'
 
 // Composables
 import { createVuetify } from 'vuetify'
-import * as labs from 'vuetify/labs/components'
 import colors from 'vuetify/lib/util/colors'
 
 const gardenerGreen = '#0b8062'
@@ -25,7 +24,7 @@ const light = {
     primary: gardenerGreen,
     secondary: colors.grey.darken3,
     unknown: colors.grey.darken1,
-    accent: colors.blue.accent1,
+    accent: colors.orange.lighten5,
     error: colors.red.accent2,
     info: colors.blue.base,
     success: colors.green.base,
@@ -45,7 +44,7 @@ const dark = {
     primary: gardenerGreen,
     secondary: colors.grey.darken3,
     unknown: colors.grey.darken1,
-    accent: colors.pink.accent2,
+    accent: colors.grey.darken3,
     error: colors.red.darken4,
     info: colors.blue.base,
     success: colors.green.base,
@@ -62,6 +61,7 @@ const variations = {
   colors: [
     'primary',
     'secondary',
+    'accent',
     'error',
     'info',
     'success',
@@ -69,8 +69,8 @@ const variations = {
     'main-background',
     'toolbar-background',
   ],
-  lighten: 1,
-  darken: 2,
+  lighten: 3,
+  darken: 3,
 }
 
 export default createVuetify({
@@ -81,8 +81,5 @@ export default createVuetify({
     defaultTheme: 'light',
     themes: { light, dark },
     variations,
-  },
-  components: {
-    ...labs,
   },
 })

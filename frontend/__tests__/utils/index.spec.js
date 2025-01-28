@@ -6,15 +6,23 @@
 
 import {
   canI,
-  selectedImageIsNotLatest,
+  machineImageHasUpdate,
   isHtmlColorCode,
   defaultCriNameByKubernetesVersion,
   getIssueSince,
   maintenanceWindowWithBeginAndTimezone,
   getDurationInMinutes,
+  getTimeStringTo,
+  getTimeStringFrom,
+  parseNumberWithMagnitudeSuffix,
+  normalizeVersion,
+  isEmail,
+  convertToGi,
+  convertToGibibyte,
 } from '@/utils'
 
-import { pick } from '@/lodash'
+import pick from 'lodash/pick'
+import find from 'lodash/find'
 
 describe('utils', () => {
   describe('authorization', () => {
@@ -178,75 +186,105 @@ describe('utils', () => {
     })
   })
 
-  describe('#selectedImageIsNotLatest', () => {
+  describe('#machineImageHasUpdate', () => {
     const sampleMachineImages = [
       {
-        name: 'FooImage',
         vendorName: 'Foo',
-        icon: 'icon',
         version: '1.1.1',
-        expirationDate: '2119-04-05T01:02:03Z', // not expired
         isSupported: true,
       },
       {
-        name: 'FooImage2',
         vendorName: 'Foo',
-        icon: 'icon',
-        version: '1.2.2',
+        version: '1.1.2',
         isSupported: true,
       },
       {
-        name: 'FooImage3',
         vendorName: 'Foo',
-        icon: 'icon',
-        version: '1.3.2',
+        version: '1.1.3',
+        isSupported: false,
+      },
+      {
+        vendorName: 'Foo',
+        version: '1.2.0',
         isSupported: true,
       },
       {
-        name: 'FooImage4',
         vendorName: 'Foo',
-        icon: 'icon',
-        version: '1.3.3',
-        expirationDate: '2119-04-05T01:02:03Z', // not expired
-        isPreview: true,
-      },
-      {
-        name: 'BarImage',
-        vendorName: 'Bar',
-        icon: 'icon',
-        version: '3.3.2',
+        version: '2.0.0',
         isSupported: true,
-        expirationDate: '2019-04-05T01:02:03Z', // expired
       },
       {
-        name: 'FooImage5',
-        vendorName: 'Foo',
-        icon: 'icon',
-        version: '1.3.4',
-        isDeprecated: true,
-      },
-      {
-        name: 'FooImage6',
-        vendorName: 'Foo',
-        icon: 'icon',
-        version: '1.4.4',
-        isPreview: true,
+        vendorName: 'Bar', // Ensures other vendors are not considered for update
+        version: '1.1.5',
+        isSupported: true,
       },
     ]
 
-    it('selected image should not be be latest (one newer supported exists)', () => {
-      const result = selectedImageIsNotLatest(sampleMachineImages[1], sampleMachineImages)
+    function createMachineImage (version, updateStrategy) {
+      return {
+        ...find(sampleMachineImages, ['version', version]),
+        updateStrategy,
+      }
+    }
+
+    it('image should have update (updateStrategy major | patch, minor, major exist)', () => {
+      const maschineImage = createMachineImage('1.1.1', 'major')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
       expect(result).toBe(true)
     })
 
-    it('selected image should be latest (only newer deprecated, preview and other vendor exists)', () => {
-      const result = selectedImageIsNotLatest(sampleMachineImages[2], sampleMachineImages)
+    it('image should have update (updateStrategy minor | patch, minor, major exist)', () => {
+      const maschineImage = createMachineImage('1.1.1', 'minor')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
+      expect(result).toBe(true)
+    })
+
+    it('image should have update (updateStrategy patch | patch, minor, major exist)', () => {
+      const maschineImage = createMachineImage('1.1.1', 'patch')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
+      expect(result).toBe(true)
+    })
+
+    it('image should have update (updateStrategy major | minor, major exist)', () => {
+      const maschineImage = createMachineImage('1.1.2', 'major')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
+      expect(result).toBe(true)
+    })
+
+    it('image should have update (updateStrategy minor | minor, major exist)', () => {
+      const maschineImage = createMachineImage('1.1.2', 'minor')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
+      expect(result).toBe(true)
+    })
+
+    it('image should not have update (updateStrategy patch | minor, major exist)', () => {
+      const maschineImage = createMachineImage('1.1.2', 'patch')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
       expect(result).toBe(false)
     })
 
-    it('selected image should be latest (only one exists)', () => {
-      const result = selectedImageIsNotLatest(sampleMachineImages[4], sampleMachineImages)
+    it('image should have update (updateStrategy major | major exists)', () => {
+      const maschineImage = createMachineImage('1.2.0', 'major')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
+      expect(result).toBe(true)
+    })
+
+    it('image should not have update (updateStrategy minor | major exists)', () => {
+      const maschineImage = createMachineImage('1.2.0', 'minor')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
       expect(result).toBe(false)
+    })
+
+    it('image should not have update (updateStrategy major | none exists)', () => {
+      const maschineImage = createMachineImage('2.0.0', 'major')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
+      expect(result).toBe(false)
+    })
+
+    it('image should have update (updateStrategy unknown defaults to major | major exists)', () => {
+      const maschineImage = createMachineImage('1.2.0', 'foo')
+      const result = machineImageHasUpdate(maschineImage, sampleMachineImages)
+      expect(result).toBe(true)
     })
   })
 
@@ -368,6 +406,156 @@ describe('utils', () => {
     })
     it('should calculate window size across multiple days', () => {
       expect(getDurationInMinutes('23:00', '01:00')).toBe(120)
+    })
+  })
+
+  describe('getTimeStringTo', () => {
+    it('should calculate the relative time to a future date', () => {
+      const time = Date.now()
+      expect(getTimeStringTo(time, time)).toBe('just now')
+      expect(getTimeStringTo(time, time, true)).toBe('just now')
+      expect(getTimeStringTo(time, time + 7 * 1_000, true)).toBe('7 seconds')
+      expect(getTimeStringTo(time, time + 7 * 1_000)).toBe('in 7 seconds')
+      expect(getTimeStringTo(time, time + 70 * 24 * 3600_000, true)).toBe('2 months')
+      expect(getTimeStringTo(time, time + 70 * 24 * 3600_000)).toBe('in 2 months')
+    })
+  })
+
+  describe('getTimeStringFrom', () => {
+    it('should calculate the relative time to a date in the past', () => {
+      const time = Date.now()
+      expect(getTimeStringFrom(time, time)).toBe('just now')
+      expect(getTimeStringFrom(time, time, true)).toBe('just now')
+      expect(getTimeStringFrom(time, time + 7 * 1_000, true)).toBe('7 seconds')
+      expect(getTimeStringFrom(time, time + 7 * 1_000)).toBe('7 seconds ago')
+      expect(getTimeStringFrom(time, time + 70 * 24 * 3600_000, true)).toBe('2 months')
+      expect(getTimeStringFrom(time, time + 70 * 24 * 3600_000)).toBe('2 months ago')
+    })
+  })
+
+  describe('parseNumberWithMagnitudeSuffix', () => {
+    it('should convert k to thousands', () => {
+      expect(parseNumberWithMagnitudeSuffix('1k')).toBe(1000)
+      expect(parseNumberWithMagnitudeSuffix('1K')).toBe(1000)
+    })
+
+    it('should convert M to millions', () => {
+      expect(parseNumberWithMagnitudeSuffix('1M')).toBe(1000000)
+      expect(parseNumberWithMagnitudeSuffix('1m')).toBe(1000000)
+    })
+
+    it('should convert B to billions', () => {
+      expect(parseNumberWithMagnitudeSuffix('1B')).toBe(1000000000)
+      expect(parseNumberWithMagnitudeSuffix('1b')).toBe(1000000000)
+    })
+
+    it('should convert T to trillions', () => {
+      expect(parseNumberWithMagnitudeSuffix('1T')).toBe(1000000000000)
+      expect(parseNumberWithMagnitudeSuffix('1t')).toBe(1000000000000)
+    })
+
+    it('should handle decimal values correctly', () => {
+      expect(parseNumberWithMagnitudeSuffix('1.5k')).toBe(1500)
+      expect(parseNumberWithMagnitudeSuffix('2.5M')).toBe(2500000)
+    })
+
+    it('should return the original number if no suffix', () => {
+      expect(parseNumberWithMagnitudeSuffix('500')).toBe(500)
+    })
+
+    test('returns null for invalid input', () => {
+      expect(parseNumberWithMagnitudeSuffix('x1')).toBeNull()
+    })
+
+    test('returns null for invalid suffix', () => {
+      expect(parseNumberWithMagnitudeSuffix('1x')).toBeNull()
+    })
+  })
+
+  describe('isEmail', () => {
+    it('should return true for valid emails', () => {
+      expect(isEmail('a@b.de')).toBe(true)
+      expect(isEmail('a@b.a.r.com')).toBe(true)
+      expect(isEmail('abcdefghijklmnopqrstuvwxyz0123456789.!#$%&’*+/=?^_`{|}~-@bar.com')).toBe(true)
+    })
+
+    it('should return false for valid emails', () => {
+      expect(isEmail(undefined)).toBe(false)
+      expect(isEmail('')).toBe(false)
+      expect(isEmail('a'.repeat(321))).toBe(false)
+      expect(isEmail('bar.com')).toBe(false)
+      expect(isEmail('a@b@bar.com')).toBe(false)
+      expect(isEmail('a@b@bar.com')).toBe(false)
+      expect(isEmail('@bar.com')).toBe(false)
+      expect(isEmail('a@bar')).toBe(false)
+      expect(isEmail('<a>@bar.com')).toBe(false)
+      expect(isEmail('a@bar.c')).toBe(false)
+      expect(isEmail('a@bar..com')).toBe(false)
+      expect(isEmail('abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789@bar.com')).toBe(false)
+    })
+  })
+
+  describe('normalizeVersion', () => {
+    it('should fill missing segments', () => {
+      expect(normalizeVersion('1.12')).toBe('1.12.0')
+      expect(normalizeVersion('2')).toBe('2.0.0')
+    })
+
+    it('should cut additional segments', () => {
+      expect(normalizeVersion('1.2.23.4')).toBe('1.2.23')
+    })
+
+    it('should preserve pre-release or build suffix', () => {
+      expect(normalizeVersion('1.2-beta')).toBe('1.2.0-beta')
+      expect(normalizeVersion('1.2.14.3+abcd')).toBe('1.2.14+abcd')
+    })
+
+    it('should remove leading zeros', () => {
+      expect(normalizeVersion('23.05')).toBe('23.5.0')
+    })
+
+    it('should allow only integer segments', () => {
+      expect(normalizeVersion('23.1e1')).toBeUndefined()
+      expect(normalizeVersion('23.x')).toBeUndefined()
+    })
+
+    it('should not allow pre or suffix other than allowed ones', () => {
+      expect(normalizeVersion('x23.1')).toBeUndefined()
+      expect(normalizeVersion('23.2x')).toBeUndefined()
+    })
+  })
+
+  describe('convertToGi', () => {
+    const precision = 9
+    it('should convert binary units to Gibibyte', () => {
+      expect(convertToGi('1Ki')).toBe(Math.pow(1024, -2))
+      expect(convertToGi('1Mi')).toBe(Math.pow(1024, -1))
+      expect(convertToGi('1Gi')).toBe(Math.pow(1024, 0))
+      expect(convertToGi('1Ti')).toBe(Math.pow(1024, 1))
+      expect(convertToGi('1Pi')).toBe(Math.pow(1024, 2))
+    })
+
+    it('should convert decimal units to Gibibyte', () => {
+      expect(convertToGi('1')).toBeCloseTo(Math.pow(1000, 3) * Math.pow(1024, -6), precision)
+      expect(convertToGi('1K')).toBeCloseTo(Math.pow(1000, 3) * Math.pow(1024, -5), precision)
+      expect(convertToGi('1M')).toBeCloseTo(Math.pow(1000, 3) * Math.pow(1024, -4), precision)
+      expect(convertToGi('1G')).toBeCloseTo(Math.pow(1000, 3) * Math.pow(1024, -3), precision)
+      expect(convertToGi('1T')).toBeCloseTo(Math.pow(1000, 3) * Math.pow(1024, -2), precision)
+      expect(convertToGi('1P')).toBeCloseTo(Math.pow(1000, 3) * Math.pow(1024, -1), precision)
+    })
+
+    it('should convert floats to Gibibyte', () => {
+      expect(convertToGi('1.23Gi')).toBe(1.23)
+      expect(convertToGi('4.56Ti')).toBe(4.56 * Math.pow(1024, 1))
+      expect(convertToGi('7.89G')).toBeCloseTo(7.89 * Math.pow(1000, 3) * Math.pow(1024, -3), precision)
+    })
+
+    it('should fail to convert to Gibibyte', () => {
+      expect(() => convertToGibibyte('1.2.3')).toThrow(TypeError)
+      expect(() => convertToGibibyte('1Xi')).toThrow(TypeError)
+      expect(() => convertToGibibyte('1E3')).toThrow(TypeError)
+      expect(() => convertToGibibyte('1,23')).toThrow(TypeError)
+      expect(() => convertToGibibyte('Gi')).toThrow(TypeError)
     })
   })
 })

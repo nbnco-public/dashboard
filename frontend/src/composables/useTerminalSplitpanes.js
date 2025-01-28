@@ -7,6 +7,8 @@
 import {
   ref,
   computed,
+  inject,
+  provide,
 } from 'vue'
 import {
   useRouter,
@@ -15,35 +17,39 @@ import {
 
 import { useAppStore } from '@/store/app'
 import { useAuthzStore } from '@/store/authz'
+import { useShootStore } from '@/store/shoot'
 import { useLocalStorageStore } from '@/store/localStorage'
 
-import { TargetEnum } from '@/utils'
+import { useApi } from '@/composables/useApi'
+
+import {
+  isStatusHibernated,
+  TargetEnum,
+} from '@/utils'
 
 import {
   GSymbolTree,
   Leaf,
 } from '@/lib/g-symbol-tree'
 
-import { useApi } from './useApi'
+import every from 'lodash/every'
+import get from 'lodash/get'
+import pick from 'lodash/pick'
+import filter from 'lodash/filter'
+import includes from 'lodash/includes'
+import isEmpty from 'lodash/isEmpty'
+import map from 'lodash/map'
+import merge from 'lodash/merge'
+import cloneDeep from 'lodash/cloneDeep'
+import difference from 'lodash/difference'
 
-import {
-  every,
-  get,
-  pick,
-  filter,
-  includes,
-  map,
-  merge,
-  cloneDeep,
-  difference,
-} from '@/lodash'
-
-export const useTerminalSplitpanes = () => {
+export function createTerminalSplitpanesComposable () {
   const api = useApi()
   const router = useRouter()
   const route = useRoute()
   const authzStore = useAuthzStore()
   const appStore = useAppStore()
+  const shootStore = useShootStore()
   const localStorageStore = useLocalStorageStore()
 
   let symbolTree = new GSymbolTree()
@@ -57,6 +63,26 @@ export const useTerminalSplitpanes = () => {
 
   const terminalCoordinates = computed(() => {
     return pick(route.params, ['name', 'namespace', 'target'])
+  })
+
+  const shootItem = computed(() => {
+    return shootStore.shootByNamespaceAndName(terminalCoordinates.value)
+  })
+
+  const shootNamespace = computed(() => {
+    return get(terminalCoordinates.value, ['namespace'])
+  })
+
+  const shootName = computed(() => {
+    return get(terminalCoordinates.value, ['name'])
+  })
+
+  const hasShootWorkerGroups = computed(() => {
+    return !isEmpty(get(shootItem.value, ['spec', 'provider', 'workers'], []))
+  })
+
+  const isShootStatusHibernated = computed(() => {
+    return isStatusHibernated(get(shootItem.value, ['status']))
   })
 
   const slotItemUUIds = computed(() => {
@@ -168,7 +194,7 @@ export const useTerminalSplitpanes = () => {
     }
     if (!targetId) {
       const lastChild = symbolTree.lastChild(symbolTree.root, true)
-      targetId = get(lastChild, 'uuid')
+      targetId = get(lastChild, ['uuid'])
     }
     return targetId
   }
@@ -217,9 +243,14 @@ export const useTerminalSplitpanes = () => {
   }
 
   return {
+    terminalCoordinates,
+    shootItem,
+    shootNamespace,
+    shootName,
+    hasShootWorkerGroups,
+    isShootStatusHibernated,
     splitpaneTree,
     newTerminalPrompt,
-    terminalCoordinates,
     defaultTarget,
     add,
     setSelections,
@@ -231,4 +262,14 @@ export const useTerminalSplitpanes = () => {
     leavePage,
     isTreeEmpty,
   }
+}
+
+export function useTerminalSplitpanes () {
+  return inject('terminal-splitpanes', null)
+}
+
+export function useProvideTerminalSplitpanes () {
+  const terminalSplitpanesComposable = createTerminalSplitpanesComposable()
+  provide('terminal-splitpanes', terminalSplitpanesComposable)
+  return terminalSplitpanesComposable
 }

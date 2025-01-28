@@ -7,75 +7,68 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-action-button-dialog
     ref="actionDialog"
-    :shoot-item="shootItem"
-    :valid="!v$.$invalid"
     width="450"
     caption="Configure Purpose"
     @dialog-opened="onConfigurationDialogOpened"
   >
-    <template #actionComponent>
-      <g-purpose
-        ref="purposeRef"
-        :secret="secret"
-        @update-purpose="onUpdatePurpose"
-      />
+    <template #content>
+      <v-card-text>
+        <g-purpose
+          v-model="purpose"
+          :purposes="allPurposes"
+        />
+      </v-card-text>
     </template>
   </g-action-button-dialog>
 </template>
 
 <script>
+import {
+  ref,
+  defineAsyncComponent,
+} from 'vue'
 import { useVuelidate } from '@vuelidate/core'
-import { defineAsyncComponent } from 'vue'
-import { mapState } from 'pinia'
-
-import { useSecretStore } from '@/store/secret'
 
 import GActionButtonDialog from '@/components/dialogs/GActionButtonDialog'
 
-import { useAsyncRef } from '@/composables/useAsyncRef'
+import { useShootItem } from '@/composables/useShootItem'
+import { useShootHelper } from '@/composables/useShootHelper'
 
 import { errorDetailsFromError } from '@/utils/error'
-import shootItem from '@/mixins/shootItem'
-
-import { find } from '@/lodash'
 
 export default {
   components: {
     GActionButtonDialog,
     GPurpose: defineAsyncComponent(() => import('@/components/GPurpose')),
   },
-  mixins: [
-    shootItem,
-  ],
   inject: ['api', 'logger'],
   setup () {
+    const {
+      shootNamespace,
+      shootName,
+      shootSecretBindingName,
+      shootPurpose,
+    } = useShootItem()
+
+    const {
+      allPurposes,
+    } = useShootHelper()
+
+    const purpose = ref(shootPurpose.value)
+
     return {
-      ...useAsyncRef('purpose'),
       v$: useVuelidate(),
+      shootNamespace,
+      shootName,
+      shootSecretBindingName,
+      shootPurpose,
+      allPurposes,
+      purpose,
     }
-  },
-  data () {
-    return {
-      purposeValue: undefined,
-    }
-  },
-  computed: {
-    ...mapState(useSecretStore, ['infrastructureSecretList']),
-    secret () {
-      const secrets = this.infrastructureSecretList
-      const secret = find(secrets, ['metadata.name', this.shootSecretBindingName])
-      if (!secret) {
-        this.logger.error('Secret must not be undefined')
-      }
-      return secret
-    },
   },
   methods: {
-    onUpdatePurpose (purpose) {
-      this.purposeValue = purpose
-    },
     async onConfigurationDialogOpened () {
-      await this.reset()
+      this.purpose = this.shootPurpose
       const confirmed = await this.$refs.actionDialog.waitForDialogClosed()
       if (confirmed) {
         await this.updateConfiguration()
@@ -87,7 +80,7 @@ export default {
           namespace: this.shootNamespace,
           name: this.shootName,
           data: {
-            purpose: this.purposeValue,
+            purpose: this.purpose,
           },
         })
       } catch (err) {
@@ -97,10 +90,6 @@ export default {
         this.$refs.actionDialog.setError({ errorMessage, detailedErrorMessage })
         this.logger.error(errorMessage, errorDetails.errorCode, errorDetails.detailedMessage, err)
       }
-    },
-    async reset () {
-      this.purposeValue = this.shootPurpose
-      await this.purpose.dispatch('setPurpose', this.purposeValue)
     },
   },
 }

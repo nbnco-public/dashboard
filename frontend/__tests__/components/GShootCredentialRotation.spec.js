@@ -4,32 +4,51 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+import {
+  ref,
+  reactive,
+  toRef,
+} from 'vue'
 import { mount } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
-import { reactive } from 'vue'
 
 import GShootCredentialRotationCard from '@/components/ShootDetails/GShootCredentialRotationCard.vue'
 import GCredentialTile from '@/components/GCredentialTile.vue'
-import GShootMessages from '@/components/ShootMessages/GShootMessages.vue'
 import GShootActionRotateCredentials from '@/components/GShootActionRotateCredentials.vue'
 
-const { createPlugins } = global.fixtures.helper
+import { createShootItemComposable } from '@/composables/useShootItem'
+
+import {
+  components as componentsPlugin,
+  utils as utilsPlugin,
+  notify as notifyPlugin,
+} from '@/plugins'
+
+const { createVuetifyPlugin } = global.fixtures.helper
 
 describe('components', () => {
   describe('g-shoot-credential-rotation-card', () => {
     let shootItem
     let pinia
+    let activePopoverKey
 
-    function mountShootCredentialRotationCard (props) {
-      return mount(GShootCredentialRotationCard, {
+    function mountShootCredentialRotationCard (shootItem) {
+      const wrapper = mount(GShootCredentialRotationCard, {
         global: {
           plugins: [
-            ...createPlugins(),
+            createVuetifyPlugin(),
+            componentsPlugin,
+            utilsPlugin,
+            notifyPlugin,
             pinia,
           ],
+          provide: {
+            activePopoverKey,
+            'shoot-item': createShootItemComposable(toRef(shootItem)),
+          },
         },
-        props,
       })
+      return wrapper
     }
 
     beforeEach(() => {
@@ -44,15 +63,18 @@ describe('components', () => {
           },
         },
       })
+      activePopoverKey = ref('')
       shootItem = reactive({
         spec: {
-          kubernetes: {
-            enableStaticTokenKubeconfig: true,
-          },
           provider: {
             workers: [
               {},
             ],
+            workerSettings: {
+              sshAccess: {
+                enabled: true,
+              },
+            },
           },
         },
         status: {
@@ -90,34 +112,46 @@ describe('components', () => {
 
     describe('Show or hide credential tiles', () => {
       it('should have all credential tiles', () => {
-        const wrapper = mountShootCredentialRotationCard({
-          shootItem,
-        })
+        const wrapper = mountShootCredentialRotationCard(shootItem)
         const credentialWrappers = wrapper.findAllComponents(GCredentialTile)
-        expect(credentialWrappers.length).toBe(7)
+        expect(credentialWrappers.length).toBe(6)
       })
 
       it('should hide not available tiles', () => {
-        shootItem.spec.kubernetes.enableStaticTokenKubeconfig = false
         shootItem.spec.purpose = 'testing'
         delete shootItem.spec.provider.workers
 
-        const wrapper = mountShootCredentialRotationCard({
-          shootItem,
-        })
+        const wrapper = mountShootCredentialRotationCard(shootItem)
         const credentialWrappers = wrapper.findAllComponents(GCredentialTile)
         expect(credentialWrappers.length).toBe(4)
       })
     })
 
     describe('Credential tiles', () => {
+      it('should not include SSH key rotation when SSH access is disabled', () => {
+        shootItem.spec.provider.workerSettings.sshAccess.enabled = false
+        const wrapper = mountShootCredentialRotationCard(shootItem)
+        const credentialWrappers = wrapper.findAllComponents(GCredentialTile)
+
+        // Ensure SSH key tile is not present
+        const sshKeyWrapper = credentialWrappers.find(wrapper => wrapper.vm.type === 'sshKeypair')
+        expect(sshKeyWrapper).toBe(undefined)
+      })
+
+      it('should include SSH key rotation when SSH access is enabled', () => {
+        shootItem.spec.provider.workerSettings.sshAccess.enabled = true
+        const wrapper = mountShootCredentialRotationCard(shootItem)
+        const credentialWrappers = wrapper.findAllComponents(GCredentialTile)
+
+        // Ensure SSH key tile is present
+        const sshKeyWrapper = credentialWrappers.find(wrapper => wrapper.vm.type === 'sshKeypair')
+        expect(sshKeyWrapper).toBeDefined()
+      })
+
       it('should compute phases', () => {
-        const wrapper = mountShootCredentialRotationCard({
-          shootItem,
-        })
+        const wrapper = mountShootCredentialRotationCard(shootItem)
         const [
           allWrapper,
-          ,
           certificateAuthoritiesWrapper,
           ,
           ,
@@ -140,12 +174,9 @@ describe('components', () => {
       })
 
       it('should compute lastInitiationTime / lastCompletionTime', () => {
-        const wrapper = mountShootCredentialRotationCard({
-          shootItem,
-        })
+        const wrapper = mountShootCredentialRotationCard(shootItem)
         const [
           allWrapper,
-          ,
           certificateAuthoritiesWrapper,
         ] = wrapper.findAllComponents(GCredentialTile)
 
@@ -155,9 +186,6 @@ describe('components', () => {
         // no lastInitiationTime for overall tile
         expect(allWrapper.vm.lastInitiationTime).toBeUndefined()
 
-        // no lastCompletionTime if enableStaticTokenKubeconfig is true and kubeconfig value is not set
-        expect(allWrapper.vm.lastCompletionTime).toBeUndefined()
-        shootItem.spec.kubernetes.enableStaticTokenKubeconfig = false
         expect(allWrapper.vm.lastCompletionTime).toBe('2022-06-27T08:25:58Z')
 
         // no lastCompletionTime if lastCompletionTime is not set for all items
@@ -166,17 +194,13 @@ describe('components', () => {
       })
 
       it('should show warning in case CACertificateValiditiesAcceptable constraint is false', async () => {
-        const wrapper = mountShootCredentialRotationCard({
-          shootItem,
-        })
+        const wrapper = mountShootCredentialRotationCard(shootItem)
         const [
           ,
           ,
           certificateAuthoritiesWrapper,
         ] = wrapper.findAllComponents(GCredentialTile)
 
-        let shootMessagesWrapper = wrapper.findComponent(GShootMessages)
-        expect(shootMessagesWrapper.exists()).toBe(false)
         expect(certificateAuthoritiesWrapper.vm.iconColor).toBe('primary')
 
         shootItem.status.constraints.push(
@@ -187,17 +211,12 @@ describe('components', () => {
         )
         await certificateAuthoritiesWrapper.vm.$forceUpdate()
 
-        shootMessagesWrapper = certificateAuthoritiesWrapper.findComponent(GShootMessages)
-        expect(shootMessagesWrapper.exists()).toBe(true)
         expect(certificateAuthoritiesWrapper.vm.iconColor).toBe('warning')
       })
 
       it('should compute phaseType', () => {
-        const wrapper = mountShootCredentialRotationCard({
-          shootItem,
-        })
+        const wrapper = mountShootCredentialRotationCard(shootItem)
         const [
-          ,
           ,
           certificateAuthoritiesWrapper,
           observabilityRotationWrapper,
@@ -218,11 +237,8 @@ describe('components', () => {
         delete shootItem.status.credentials.rotation.sshKeypair.lastCompletionTime // only lastInitiationTime timestamp
         shootItem.status.credentials.rotation.observability.lastInitiationTime = '2022-08-05T10:01:42Z' // lastInitiationTime > lastCompletionTime
 
-        const wrapper = mountShootCredentialRotationCard({
-          shootItem,
-        })
+        const wrapper = mountShootCredentialRotationCard(shootItem)
         const [
-          ,
           ,
           ,
           observabilityRotationWrapper,
@@ -244,13 +260,10 @@ describe('components', () => {
       let etcdEncryptionKeyRotationWrapper
       let serviceAccountKeyRotationWrapper
 
-      beforeEach(async () => {
-        const wrapper = mountShootCredentialRotationCard({
-          shootItem,
-        })
+      beforeEach(() => {
+        const wrapper = mountShootCredentialRotationCard(shootItem)
         const [
           allTileWrapper,
-          ,
           certificateAuthoritiesTileWrapper,
           observabilityTileWrapper,
           ,

@@ -7,10 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    vendor="cloudflare-dns"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
     create-title="Add new Cloudflare Secret"
     replace-title="Replace Cloudflare Secret"
   >
@@ -20,7 +18,7 @@ SPDX-License-Identifier: Apache-2.0
           v-model="apiToken"
           color="primary"
           label="Cloudflare API Token"
-          :error-messages="getErrorMessages('apiToken')"
+          :error-messages="getErrorMessages(v$.apiToken)"
           :append-icon="hideApiToken ? 'mdi-eye' : 'mdi-eye-off'"
           :type="hideApiToken ? 'password' : 'text'"
           variant="underlined"
@@ -34,7 +32,8 @@ SPDX-License-Identifier: Apache-2.0
     <template #help-slot>
       <div>
         <p>
-          To use this provider you need to generate an API token from the Cloudflare dashboard. A detailed documentation to generate an API token is available at <g-external-link url="https://support.cloudflare.com/hc/en-us/articles/200167836-Managing-API-Tokens-and-Keys" />.
+          To use this provider you need to generate an API token from the Cloudflare dashboard. A detailed documentation to generate an API token is available at
+          <g-external-link url="https://support.cloudflare.com/hc/en-us/articles/200167836-Managing-API-Tokens-and-Keys" />.
         </p>
         <p class="font-weight-bold">
           Note: You need to generate an API token and not an API key.
@@ -48,9 +47,7 @@ SPDX-License-Identifier: Apache-2.0
         <p>
           Generate the token and keep this key safe as it won't be shown again.
         </p>
-        <p>
-          <pre>$ echo -n '1234567890123456789' | base64</pre>
-        </p>
+        <pre>$ echo -n '1234567890123456789' | base64</pre>
         <p>
           to get the base64 encoded token. In this eg. this would be MTIzNDU2Nzg5MDEyMzQ1Njc4OQ==.
         </p>
@@ -66,13 +63,10 @@ import { required } from '@vuelidate/validators'
 import GSecretDialog from '@/components/Secrets/GSecretDialog'
 import GExternalLink from '@/components/GExternalLink'
 
-import { getValidationErrors } from '@/utils'
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
 
-const validationErrors = {
-  apiToken: {
-    required: 'You can\'t leave this empty.',
-  },
-}
+import { getErrorMessages } from '@/utils'
+import { withFieldName } from '@/utils/validators'
 
 export default {
   components: {
@@ -84,7 +78,7 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
   },
@@ -92,20 +86,28 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const { apiToken } = secretStringDataRefs({
+      apiToken: 'apiToken',
+    })
+
     return {
+      apiToken,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      apiToken: undefined,
       hideApiToken: true,
-      validationErrors,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      apiToken: withFieldName('API Token', {
+        required,
+      }),
+    }
   },
   computed: {
     visible: {
@@ -119,38 +121,12 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    secretData () {
-      return {
-        apiToken: this.apiToken,
-      }
-    },
-    validators () {
-      const validators = {
-        apiToken: {
-          required,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
   },
-  watch: {
-    value: function (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
   methods: {
-    reset () {
-      this.v$.$reset()
-      this.apiToken = ''
-    },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>

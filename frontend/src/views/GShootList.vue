@@ -86,7 +86,7 @@ SPDX-License-Identifier: Apache-2.0
                 density="compact"
                 class="g-table-search-field mr-3"
                 @update:model-value="onUpdateShootSearch"
-                @keyup.esc="resetShootSearch"
+                @keyup.esc="setShootSearch(null)"
               />
             </template>
             Search terms are <span class="font-weight-bold">ANDed</span>.<br>
@@ -154,82 +154,60 @@ SPDX-License-Identifier: Apache-2.0
           />
         </template>
       </g-toolbar>
-      <v-data-table
-        v-model:page="page"
+      <v-data-table-virtual
+        ref="shootTable"
         v-model:sort-by="sortByInternal"
-        v-model:items-per-page="shootItemsPerPage"
         :headers="visibleHeaders"
         :items="sortedAndFilteredItems"
-        hover
         :loading="loading || !connected"
-        :items-per-page-options="itemsPerPageOptions"
-        :custom-key-sort="disableCustomKeySort(visibleHeaders)"
+        :custom-key-sort="customKeySort"
+        hover
         must-sort
+        fixed-header
         class="g-table"
+        height="calc(100vh - 240px)"
+        item-height="52px"
       >
         <template #progress>
           <g-shoot-list-progress />
         </template>
+        <template #loading>
+          Loading clusters ...
+        </template>
+        <template #no-data>
+          No clusters to show
+        </template>
         <template #item="{ item }">
           <g-shoot-list-row
-            :key="item.raw.metadata.uid"
-            :shoot-item="item.raw"
+            :model-value="item"
             :visible-headers="visibleHeaders"
-            @show-dialog="showDialog"
           />
         </template>
-        <template #bottom="{ pageCount }">
+        <template #bottom>
           <g-data-table-footer
-            v-model:page="page"
-            v-model:items-per-page="shootItemsPerPage"
             :items-length="sortedAndFilteredItems.length"
-            :items-per-page-options="itemsPerPageOptions"
-            :page-count="pageCount"
           />
         </template>
-      </v-data-table>
-      <v-dialog
-        v-model="clusterAccessDialog"
-        persistent
-        max-width="850"
-      >
-        <v-card>
-          <g-toolbar>
-            Cluster Access
-            <code class="text-toolbar-title">
-              {{ currentName }}
-            </code>
-            <template #append>
-              <v-btn
-                variant="text"
-                density="comfortable"
-                icon="mdi-close"
-                color="toolbar-title"
-                @click.stop="hideDialog"
-              />
-            </template>
-          </g-toolbar>
-          <g-shoot-access-card
-            ref="clusterAccess"
-            :shoot-item="shootItem"
-            :hide-terminal-shortcuts="true"
-          />
-        </v-card>
-      </v-dialog>
+      </v-data-table-virtual>
     </v-card>
+    <g-shoot-list-actions />
   </v-container>
 </template>
 
 <script>
 import {
-  defineAsyncComponent,
-  toRaw,
+  ref,
+  reactive,
+  provide,
+  toRef,
+  watch,
 } from 'vue'
 import {
   mapState,
   mapWritableState,
   mapActions,
 } from 'pinia'
+import { useUrlSearchParams } from '@vueuse/core'
 
 import { useAuthnStore } from '@/store/authn'
 import { useAuthzStore } from '@/store/authz'
@@ -246,67 +224,125 @@ import GTableColumnSelection from '@/components/GTableColumnSelection.vue'
 import GIconBase from '@/components/icons/GIconBase.vue'
 import GCertifiedKubernetes from '@/components/icons/GCertifiedKubernetes.vue'
 import GDataTableFooter from '@/components/GDataTableFooter.vue'
+import GShootListActions from '@/components/GShootListActions.vue'
+
+import { useProjectShootCustomFields } from '@/composables/useProjectShootCustomFields'
+import { isCustomField } from '@/composables/useProjectShootCustomFields/helper'
+import { useProvideShootAction } from '@/composables/useShootAction'
 
 import { mapTableHeader } from '@/utils'
 
-import {
-  debounce,
-  filter,
-  get,
-  isEmpty,
-  join,
-  map,
-  mapKeys,
-  mapValues,
-  some,
-  sortBy,
-  startsWith,
-  upperCase,
-} from '@/lodash'
+import upperCase from 'lodash/upperCase'
+import sortBy from 'lodash/sortBy'
+import some from 'lodash/some'
+import map from 'lodash/map'
+import join from 'lodash/join'
+import isEmpty from 'lodash/isEmpty'
+import unset from 'lodash/unset'
+import get from 'lodash/get'
+import filter from 'lodash/filter'
+import debounce from 'lodash/debounce'
 
 export default {
   components: {
     GToolbar,
     GShootListRow,
     GShootListProgress,
-    GShootAccessCard: defineAsyncComponent(() => import('@/components/ShootDetails/GShootAccessCard.vue')),
     GIconBase,
     GCertifiedKubernetes,
     GTableColumnSelection,
     GDataTableFooter,
+    GShootListActions,
   },
   inject: ['logger'],
   beforeRouteEnter (to, from, next) {
     next(vm => {
-      vm.cachedItems = null
       vm.updateTableSettings()
     })
   },
   beforeRouteUpdate (to, from, next) {
-    this.resetShootSearch()
+    if (to.path !== from.path) {
+      this.setShootSearch(null)
+    }
     this.updateTableSettings()
     this.focusModeInternal = false
+
+    // Reset expanded state in case project changes
+    this.resetState(this.expandedWorkerGroups, { default: false })
+    this.resetState(this.expandedAccessRestrictions, { default: false })
+
     next()
   },
   beforeRouteLeave (to, from, next) {
-    this.cachedItems = this.shootList.slice(0)
-    this.resetShootSearch()
+    this.setShootSearch(null)
     this.focusModeInternal = false
+
     next()
+  },
+  setup () {
+    const projectStore = useProjectStore()
+    const shootStore = useShootStore()
+
+    useProvideShootAction({ shootStore })
+
+    const activePopoverKey = ref('')
+    const expandedWorkerGroups = reactive({ default: false })
+    const expandedAccessRestrictions = reactive({ default: false })
+    provide('activePopoverKey', activePopoverKey)
+    provide('expandedWorkerGroups', expandedWorkerGroups)
+    provide('expandedAccessRestrictions', expandedAccessRestrictions)
+
+    const projectItem = toRef(projectStore, 'project')
+    const {
+      shootCustomFields,
+    } = useProjectShootCustomFields(projectItem)
+
+    const params = useUrlSearchParams('hash-params')
+    const shootSearch = ref(params.q)
+    const debouncedShootSearch = ref(shootSearch.value)
+
+    function setShootSearch (value) {
+      debouncedShootSearch.value = shootSearch.value = value
+    }
+
+    const setDebouncedShootSearch = debounce(() => {
+      debouncedShootSearch.value = shootSearch.value
+    }, 300)
+
+    watch(() => params.q, value => {
+      if (shootSearch.value !== value) {
+        setShootSearch(value)
+      }
+    })
+
+    watch(debouncedShootSearch, value => {
+      if (!value) {
+        params.q = null
+      } else if (params.q !== value) {
+        params.q = value
+      }
+    })
+
+    function onUpdateShootSearch (value) {
+      shootSearch.value = value
+      setDebouncedShootSearch()
+    }
+
+    return {
+      activePopoverKey,
+      expandedWorkerGroups,
+      expandedAccessRestrictions,
+      shootCustomFields,
+      shootSearch,
+      debouncedShootSearch,
+      setShootSearch,
+      onUpdateShootSearch,
+    }
   },
   data () {
     return {
-      shootSearch: '',
-      debouncedShootSearch: '',
       dialog: null,
-      page: 1,
-      cachedItems: null,
       selectedColumns: undefined,
-      itemsPerPageOptions: [
-        { value: 5, title: '5' },
-        { value: 10, title: '10' },
-        { value: 20, title: '20' },
-      ],
     }
   },
   computed: {
@@ -326,8 +362,6 @@ export default {
     }),
     ...mapState(useProjectStore, [
       'projectName',
-      'shootCustomFieldList',
-      'shootCustomFields',
     ]),
     ...mapState(useSocketStore, [
       'connected',
@@ -336,7 +370,7 @@ export default {
       'shootList',
       'shootListFilters',
       'loading',
-      'selectedItem',
+      'selectedShoot',
       'onlyShootsWithIssues',
       'numberOfNewItemsSinceFreeze',
       'focusMode',
@@ -344,7 +378,6 @@ export default {
     ]),
     ...mapWritableState(useLocalStorageStore, [
       'shootSelectedColumns',
-      'shootItemsPerPage',
       'shootSortBy',
       'shootCustomSelectedColumns',
       'shootCustomSortBy',
@@ -353,19 +386,6 @@ export default {
     ]),
     defaultSortBy () {
       return [{ key: 'name', order: 'asc' }]
-    },
-    defaultItemsPerPage () {
-      return 10
-    },
-    clusterAccessDialog: {
-      get () {
-        return this.dialog === 'access'
-      },
-      set (value) {
-        if (!value) {
-          this.hideDialog()
-        }
-      },
     },
     focusModeInternal: {
       get () {
@@ -384,11 +404,14 @@ export default {
       },
     },
     currentName () {
-      return get(this.selectedItem, 'metadata.name')
+      return get(this.selectedShoot, ['metadata', 'name'])
     },
     shootItem () {
       // property `shoot-item` of the mixin is required
-      return this.selectedItem || {}
+      return this.selectedShoot || {}
+    },
+    isShootItemEmpty () {
+      return !this.shootItem.metadata?.uid
     },
     currentStandardSelectedColumns () {
       return mapTableHeader(this.standardHeaders, 'selected')
@@ -451,7 +474,7 @@ export default {
           title: 'WORKERS',
           key: 'workers',
           sortable: isSortable(true),
-          align: 'start',
+          align: 'center',
           defaultSelected: false,
           hidden: false,
         },
@@ -564,7 +587,7 @@ export default {
     },
     customHeaders () {
       const isSortable = value => value && !this.focusModeInternal
-      const customHeaders = filter(this.shootCustomFieldList, ['showColumn', true])
+      const customHeaders = filter(this.shootCustomFields, ['showColumn', true])
 
       return map(customHeaders, ({
         align = 'left',
@@ -605,6 +628,17 @@ export default {
     },
     visibleHeaders () {
       return filter(this.selectableHeaders, ['selected', true])
+    },
+    sortableHeaders () {
+      return filter(this.visibleHeaders, ['sortable', true])
+    },
+    customKeySort () {
+      const noSort = () => 0
+      const value = {}
+      for (const header of this.sortableHeaders) {
+        value[header.key] = noSort
+      }
+      return value
     },
     allFilters () {
       return [
@@ -671,7 +705,7 @@ export default {
       },
     },
     items () {
-      return this.cachedItems || this.shootList
+      return this.shootList ?? []
     },
     changeFiltersDisabled () {
       return this.focusModeInternal
@@ -704,14 +738,19 @@ export default {
       return join(subtitle, ', ')
     },
     gitHubRepoUrl () {
-      return get(this.ticketConfig, 'gitHubRepoUrl')
+      return get(this.ticketConfig, ['gitHubRepoUrl'])
     },
     hideClustersWithLabels () {
-      return get(this.ticketConfig, 'hideClustersWithLabels', [])
+      return get(this.ticketConfig, ['hideClustersWithLabels'], [])
+    },
+    filteredItems () {
+      const query = this.debouncedShootSearch
+      return query
+        ? filter(this.items, item => this.searchItems(query, item))
+        : [...this.items]
     },
     sortedAndFilteredItems () {
-      const items = this.sortItems(this.items, this.sortByInternal)
-      return filter(items, item => this.searchItems(this.debouncedShootSearch, toRaw(item)))
+      return this.sortItems(this.filteredItems, this.sortByInternal)
     },
     issueSinceColumnVisible () {
       return this.operatorFeatures || (!this.projectScope && this.isAdmin)
@@ -719,7 +758,7 @@ export default {
   },
   watch: {
     sortBy (sortBy) {
-      if (some(sortBy, value => startsWith(value.key, 'Z_'))) {
+      if (some(sortBy, value => isCustomField(value.key))) {
         this.shootCustomSortBy = sortBy
       } else {
         this.shootCustomSortBy = null // clear project specific options
@@ -729,7 +768,6 @@ export default {
   },
   methods: {
     ...mapActions(useShootStore, [
-      'setSelection',
       'toogleShootListFilter',
       'subscribeShoots',
       'sortItems',
@@ -737,25 +775,6 @@ export default {
       'setFocusMode',
       'setSortBy',
     ]),
-    resetShootSearch () {
-      this.shootSearch = null
-      this.debouncedShootSearch = null
-    },
-    async showDialog (args) {
-      switch (args.action) {
-        case 'access':
-          try {
-            await this.setSelection(args.shootItem.metadata)
-            this.dialog = args.action
-          } catch (err) {
-            this.logger('Failed to select shoot: %s', err.message)
-          }
-      }
-    },
-    hideDialog () {
-      this.dialog = null
-      this.setSelection(null)
-    },
     setSelectedHeader (header) {
       this.selectedColumns[header.key] = !header.selected
       this.saveSelectedColumns()
@@ -772,7 +791,6 @@ export default {
         ...this.defaultCustomSelectedColumns,
       }
       this.saveSelectedColumns()
-      this.shootItemsPerPage = this.defaultItemsPerPage
       this.sortByInternal = this.defaultSortBy
     },
     updateTableSettings () {
@@ -801,20 +819,13 @@ export default {
     },
     isFilterActive (key) {
       const filters = this.shootListFilters
-      return get(filters, key, false)
+      return get(filters, [key], false)
     },
-    onUpdateShootSearch (value) {
-      this.shootSearch = value
-
-      this.setDebouncedShootSearch()
-    },
-    setDebouncedShootSearch: debounce(function () {
-      this.debouncedShootSearch = this.shootSearch
-    }, 500),
-    disableCustomKeySort (tableHeaders) {
-      const sortableTableHeaders = filter(tableHeaders, ['sortable', true])
-      const tableKeys = mapKeys(sortableTableHeaders, ({ key }) => key)
-      return mapValues(tableKeys, () => () => 0)
+    resetState (reactiveObject, defaultState) {
+      for (const key in reactiveObject) {
+        unset(reactiveObject, [key])
+      }
+      Object.assign(reactiveObject, defaultState)
     },
   },
 }

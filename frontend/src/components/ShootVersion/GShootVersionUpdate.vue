@@ -7,39 +7,33 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <div>
     <v-select
-      v-model="selectedItem"
-      v-messages-color="{ color: 'warning' }"
-      :items="items"
+      v-model="v$.selectedItem.$model"
+      v-messages-color="{ color: hintColor }"
+      :items="visibleItems"
       color="primary"
       class="mb-2"
       item-color="primary"
       item-value="version"
       :label="label"
       :hint="hint"
-      :error="isError"
       return-object
       placeholder="Please select version..."
+      persistent-hint
+      :error-messages="getErrorMessages(v$.selectedItem)"
+      @blur="v$.selectedItem.$touch()"
     >
-      <template #item="{ props }">
+      <template #item="{ item, props }">
         <v-list-subheader
-          v-if="props.value.type === 'subheader'"
-          v-bind="props"
+          v-if="item.raw.type === 'subheader'"
+          :title="item.title"
         />
         <v-list-item
           v-else
           v-bind="props"
-          :subtitle="versionItemDescription(props.value)"
-          :disabled="props.value.notNextMinor"
+          :subtitle="versionItemDescription(item.raw)"
         >
-          <v-tooltip
-            v-if="props.value.notNextMinor"
-            activator="parent"
-            location="top"
-          >
-            You cannot upgrade your cluster more than one minor version at a time
-          </v-tooltip>
           <template #subtitle="{ subtitle }">
-            <div :class="props.value.subtitleClass">
+            <div :class="item.raw.subtitleClass">
               {{ subtitle }}
             </div>
           </template>
@@ -47,48 +41,81 @@ SPDX-License-Identifier: Apache-2.0
       </template>
     </v-select>
     <v-alert
-      v-if="currentK8sVersion.expirationDate && !selectedItem"
+      v-if="shootKubernetesVersionObject.isExpirationWarning && !selectedItem"
       type="warning"
-      variant="outlined"
+      variant="tonal"
     >
-      Current Kubernetes version expires on: {{ currentK8sVersion.expirationDateString }}.
+      Current Kubernetes version expires
+      <g-time-string
+        :date-time="shootKubernetesVersionObject.expirationDate"
+        mode="future"
+        date-tooltip
+      />.
       Kubernetes update will be enforced after that date.
     </v-alert>
   </div>
 </template>
 
 <script>
+import {
+  ref,
+  computed,
+} from 'vue'
+import { useVuelidate } from '@vuelidate/core'
+import { required } from '@vuelidate/validators'
 import semver from 'semver'
 
-import {
-  map,
-  flatMap,
-  upperFirst,
-  head,
-  get,
-  join,
-} from '@/lodash'
+import { useShootItem } from '@/composables/useShootItem'
+
+import { withFieldName } from '@/utils/validators'
+import { getErrorMessages } from '@/utils'
+
+import map from 'lodash/map'
+import flatMap from 'lodash/flatMap'
+import upperFirst from 'lodash/upperFirst'
+import head from 'lodash/head'
+import get from 'lodash/get'
+import join from 'lodash/join'
+import filter from 'lodash/filter'
 
 export default {
   props: {
-    availableK8sUpdates: {
+    modelValue: {
       type: Object,
-      required: true,
-    },
-    currentK8sVersion: {
-      type: Object,
+      default: null,
     },
   },
   emits: [
-    'selectedVersion',
-    'selectedVersionInvalid',
-    'selectedVersionType',
-    'confirmRequired',
+    'update:modelValue',
   ],
-  data () {
+  setup (props, { emit }) {
+    const {
+      shootKubernetesVersionObject,
+      shootAvailableK8sUpdates,
+    } = useShootItem()
+
+    const snackbar = ref(false)
+    const selectedItem = computed({
+      get () {
+        return props.modelValue
+      },
+      set (value) {
+        emit('update:modelValue', value)
+      },
+    })
+
+    const rules = {
+      selectedItem: withFieldName('Kubernetes Version', {
+        required,
+      }),
+    }
+
     return {
-      snackbar: false,
-      selectedItem: undefined,
+      v$: useVuelidate(rules, { selectedItem }),
+      shootKubernetesVersionObject,
+      shootAvailableK8sUpdates,
+      snackbar,
+      selectedItem,
     }
   },
   computed: {
@@ -109,13 +136,13 @@ export default {
           return {
             ...version,
             updateType,
-            title: `${this.currentK8sVersion.version} → ${version.version}`,
+            title: `${this.shootKubernetesVersionObject.version} → ${version.version}`,
             notNextMinor,
             subtitleClass,
           }
         })
       }
-      const allVersionGroups = map(this.availableK8sUpdates, selectionItemsForType)
+      const allVersionGroups = map(this.shootAvailableK8sUpdates, selectionItemsForType)
       const allItems = flatMap(allVersionGroups, versionGroup => {
         const updateType = head(versionGroup).updateType
         versionGroup.unshift({
@@ -169,55 +196,51 @@ export default {
       })
       return allItems
     },
+    visibleItems () {
+      return filter(this.items, item => !item.notNextMinor)
+    },
+    hasMoreSupportedVersions () {
+      return filter(this.items, item => item.notNextMinor && item.isSupported).length > 0
+    },
     selectedVersionIsPatch () {
-      const isPatch = get(this.selectedItem, 'updateType') === 'patch'
-      this.$emit('confirmRequired', !isPatch)
-      return isPatch
-    },
-    selectedMinorVersionIsNotNextMinor () {
-      const version = get(this, 'selectedItem.version')
-      const updateType = get(this, 'selectedItem.updateType')
-      const invalid = !version || this.itemIsNotNextMinor(version, updateType)
-      this.$emit('selectedVersionInvalid', invalid)
-      return invalid
-    },
-    isError () {
-      const selectedVersion = get(this, 'selectedItem.version')
-      return selectedVersion && this.selectedMinorVersionIsNotNextMinor
+      return get(this.selectedItem, ['updateType']) === 'patch'
     },
     label () {
       if (this.selectedVersionIsPatch) {
-        return 'Patch to Version'
+        return 'Patch to version'
       }
-      return 'Upgrade to Version'
+      return 'Upgrade to version'
     },
     hint () {
-      if (!this.selectedItem) {
-        return undefined
+      if (this.selectedItem?.isPreview) {
+        return 'Selected version is a preview version. Preview versions have not yet undergone thorough testing. There is a higher probability of undiscovered issues and are therefore not recommended for production usage'
       }
-      if (this.selectedMinorVersionIsNotNextMinor) {
-        return 'You cannot upgrade your cluster more than one minor version at a time'
+      if (this.selectedItem?.isDeprecated) {
+        return `Selected version is deprecated. It will expire on ${this.selectedItem.expirationDateString}`
       }
-      if (this.selectedItem.isPreview) {
-        return 'Selected Version is a preview version. Preview versions have not yet undergone thorough testing. There is a higher probability of undiscovered issues and are therefore not recommended for production usage'
+      if (this.hasMoreSupportedVersions) {
+        return 'There are newer minor versions available. However you can only upgrade your cluster one minor version at a time'
+      }
+      return undefined
+    },
+    hintColor () {
+      if (this.selectedItem?.isPreview || this.selectedItem?.isDeprecated) {
+        return 'warning'
+      }
+      if (this.hasMoreSupportedVersions) {
+        return 'info'
       }
       return undefined
     },
   },
-  watch: {
-    selectedItem (value) {
-      this.$emit('selectedVersion', value?.version)
-      this.$emit('selectedVersionType', value?.updateType)
-    },
-  },
   methods: {
     itemIsNotNextMinor (version, updateType) {
-      if (!this.currentK8sVersion.version) {
+      if (!this.shootKubernetesVersionObject.version) {
         return false
       }
       let invalid = false
       if (version && updateType === 'minor') {
-        const currentMinorVersion = semver.minor(this.currentK8sVersion.version)
+        const currentMinorVersion = semver.minor(this.shootKubernetesVersionObject.version)
         const selectedItemMinorVersion = semver.minor(version)
         invalid = selectedItemMinorVersion - currentMinorVersion !== 1
       }
@@ -235,9 +258,7 @@ export default {
         ? join(itemDescription, ' | ')
         : undefined
     },
-    reset () {
-      this.selectedItem = undefined
-    },
+    getErrorMessages,
   },
 }
 </script>

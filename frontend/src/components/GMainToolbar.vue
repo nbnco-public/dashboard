@@ -286,6 +286,7 @@ SPDX-License-Identifier: Apache-2.0
       #extension
     >
       <v-tabs
+        v-model="routeMetaTabKey"
         color="primary"
         slider-color="secondary"
         class="tabs-bar-background"
@@ -331,6 +332,8 @@ import { useNamespace } from '@/composables/useNamespace'
 
 import GShootSubscriptionStatus from './GShootSubscriptionStatus.vue'
 
+import get from 'lodash/get'
+
 const route = useRoute()
 
 const appStore = useAppStore()
@@ -342,6 +345,7 @@ const namespace = useNamespace(route)
 
 const help = ref(false)
 const menu = ref(false)
+const tabKey = ref(get(route, ['meta', 'tabKey']))
 const infoDialog = ref(false)
 const sidebar = toRef(appStore, 'sidebar')
 const helpMenuItems = toRef(configStore, 'helpMenuItems')
@@ -357,6 +361,15 @@ const tabs = computed(() => {
     return meta.tabs(route)
   }
   return meta.tabs
+})
+
+const routeMetaTabKey = computed({
+  get () {
+    return get(route, ['meta', 'tabKey'], tabKey.value)
+  },
+  set (value) {
+    tabKey.value = value
+  },
 })
 
 const accountLink = computed(() => {
@@ -380,7 +393,7 @@ function handleLogout () {
   if (autoLogin.value) {
     err = new Error('NoAutoLogin')
   }
-  authnStore.signout(err)
+  authnStore.signout(err, '')
 }
 
 function helpTarget (item) {
@@ -389,7 +402,8 @@ function helpTarget (item) {
 </script>
 
 <style lang="scss" scoped>
-  @import 'vuetify/settings';
+  @use 'vuetify/settings' as vuetify;
+  @use 'sass:map';
 
   .link-icon {
     font-size: 100%;
@@ -407,7 +421,7 @@ function helpTarget (item) {
 
   .v-theme--light {
     &.v-app-bar {
-      background-color: map-get($grey, 'lighten-4');
+      background-color: map.get(vuetify.$grey, 'lighten-4');
     }
     .tabs-bar-background {
       background-color: white !important;

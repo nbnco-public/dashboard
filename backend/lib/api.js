@@ -11,6 +11,7 @@ const bodyParser = require('body-parser')
 const cookieParser = require('cookie-parser')
 const zlib = require('zlib')
 const compression = require('compression')
+const config = require('./config')
 const routes = require('./routes')
 const hooks = require('./hooks')()
 const { authenticate } = require('./security')
@@ -22,12 +23,14 @@ const router = express.Router()
 
 router.use(compression({
   threshold: 8192,
-  level: zlib.constants.Z_DEFAULT_COMPRESSION
+  level: zlib.constants.Z_DEFAULT_COMPRESSION,
 }))
 router.use(requestLogger)
 router.use(monitorResponseTimes())
 router.use(cookieParser())
-router.use(bodyParser.json())
+router.use(bodyParser.json({
+  limit: config.maxRequestBodySize,
+}))
 router.use(authenticate({ createClient }))
 for (const [key, value] of Object.entries(routes)) {
   router.use(key, value)
@@ -38,5 +41,5 @@ router.use(sendError)
 // exports
 module.exports = {
   router,
-  hooks
+  hooks,
 }

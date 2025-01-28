@@ -9,44 +9,47 @@
 const assert = require('assert').strict
 const _ = require('lodash')
 
+const { format: fmt } = require('util')
+
 const {
   getConfigValue,
   getSeedNameFromShoot,
-  getSeedIngressDomain
+  getSeedIngressDomain,
 } = require('../../utils')
 
 const { getSeed, findProjectByNamespace } = require('../../cache')
 
 const GardenTerminalHostRefType = {
-  SECRET_REF: 'secretRef',
   SEED_REF: 'seedRef',
-  SHOOT_REF: 'shootRef'
+  SHOOT_REF: 'shootRef',
 }
 
 /*
-  Returns the secretRef for the cluster, that hosts the terminal pods for the (virtual)garden
+  Returns the shootRef credential for the cluster, that hosts the terminal pods for the (virtual)garden
 */
-async function getGardenTerminalHostClusterSecretRef (client) {
+async function getGardenTerminalHostClusterCredentials (client) {
   const refType = getGardenTerminalHostClusterRefType()
 
   switch (refType) {
-    case GardenTerminalHostRefType.SECRET_REF: {
-      const { items: runtimeSecrets } = await getGardenTerminalHostClusterSecrets(client)
-      const secret = _.head(runtimeSecrets)
-      return {
-        namespace: secret.metadata.namespace,
-        name: secret.metadata.name
-      }
-    }
     case GardenTerminalHostRefType.SEED_REF: {
       const seed = getSeedForGardenTerminalHostCluster()
-      return _.get(seed, 'spec.secretRef')
-    }
-    case GardenTerminalHostRefType.SHOOT_REF: { // TODO refactor to return shootRef instead. The static kubeconfig might be disabled
-      const shootName = getConfigValue('terminal.gardenTerminalHost.shootRef.name')
+      const managedSeed = await client.getManagedSeed({ namespace: 'garden', name: seed.metadata.name, throwNotFound: false })
+
+      if (!managedSeed) {
+        throw new Error(fmt('Seed %s is not a managed seed', seed.metadata.name))
+      }
       return {
+        shootRef: getShootRef(managedSeed),
+      }
+    }
+    case GardenTerminalHostRefType.SHOOT_REF: {
+      const shootName = getConfigValue('terminal.gardenTerminalHost.shootRef.name')
+      const shootRef = {
         namespace: getConfigValue('terminal.gardenTerminalHost.shootRef.namespace', 'garden'),
-        name: `${shootName}.kubeconfig`
+        name: shootName,
+      }
+      return {
+        shootRef,
       }
     }
     default:
@@ -67,9 +70,6 @@ async function getGardenHostClusterKubeApiServer (client) {
   const refType = getGardenTerminalHostClusterRefType()
 
   switch (refType) {
-    case GardenTerminalHostRefType.SECRET_REF: {
-      return getConfigValue('terminal.gardenTerminalHost.apiServerIngressHost')
-    }
     case GardenTerminalHostRefType.SEED_REF: {
       const seed = getSeedForGardenTerminalHostCluster()
       const managedSeed = await client.getManagedSeed({ namespace: 'garden', name: seed.metadata.name, throwNotFound: false })
@@ -115,32 +115,22 @@ function getGardenTerminalHostClusterRefType () {
   return _
     .chain(getConfigValue('terminal.gardenTerminalHost'))
     .keys()
-    .intersection(['secretRef', 'seedRef', 'shootRef'])
+    .intersection(['seedRef', 'shootRef'])
     .head()
     .value()
-}
-
-function getGardenTerminalHostClusterSecrets (client) {
-  const namespace = getConfigValue('terminal.gardenTerminalHost.secretRef.namespace', 'garden')
-  assert.ok(namespace, 'namespace must be set')
-  const labelSelector = getConfigValue('terminal.gardenTerminalHost.secretRef.labelSelector', ['runtime=gardenTerminalHost'])
-  const query = {
-    labelSelector: labelSelector.join(',')
-  }
-  return client.core.secrets.list(namespace, query)
 }
 
 function getShootRef (managedSeed) {
   return {
     namespace: managedSeed.metadata.namespace,
-    name: managedSeed.spec.shoot.name
+    name: managedSeed.spec.shoot.name,
   }
 }
 
 module.exports = {
   getKubeApiServerHostForSeedOrManagedSeed,
   getKubeApiServerHostForShoot,
-  getGardenTerminalHostClusterSecretRef,
+  getGardenTerminalHostClusterCredentials,
   getGardenHostClusterKubeApiServer,
-  getShootRef
+  getShootRef,
 }

@@ -12,7 +12,7 @@ SPDX-License-Identifier: Apache-2.0
     :items="machineImageItems"
     item-value="key"
     return-object
-    :error-messages="getErrorMessages('worker.machine.image')"
+    :error-messages="getErrorMessages(v$.worker.machine.image)"
     label="Machine Image"
     :hint="hint"
     persistent-hint
@@ -29,7 +29,7 @@ SPDX-License-Identifier: Apache-2.0
           <g-vendor-icon :icon="item.raw.icon" />
         </template>
         <v-list-item-title>Name: {{ item.raw.name }} | Version: {{ item.raw.version }}</v-list-item-title>
-        <v-list-item-subtitle v-if="itemDescription(item).length">
+        <v-list-item-subtitle v-if="itemDescription(item.raw).length">
           {{ itemDescription(item.raw) }}
         </v-list-item-subtitle>
       </v-list-item>
@@ -54,26 +54,15 @@ import GVendorIcon from '@/components/GVendorIcon'
 import GMultiMessage from '@/components/GMultiMessage'
 
 import {
-  getValidationErrors,
-  selectedImageIsNotLatest,
+  getErrorMessages,
+  machineImageHasUpdate,
   transformHtml,
 } from '@/utils'
+import { withFieldName } from '@/utils/validators'
 
-import {
-  pick,
-  find,
-  join,
-} from '@/lodash'
-
-const validationErrors = {
-  worker: {
-    machine: {
-      image: {
-        required: 'Machine Image is required',
-      },
-    },
-  },
-}
+import join from 'lodash/join'
+import find from 'lodash/find'
+import pick from 'lodash/pick'
 
 export default {
   components: {
@@ -89,8 +78,11 @@ export default {
       type: Array,
       default: () => [],
     },
-    updateOSMaintenance: {
+    autoUpdate: {
       type: Boolean,
+    },
+    fieldName: {
+      type: String,
     },
   },
   emits: [
@@ -99,11 +91,6 @@ export default {
   setup () {
     return {
       v$: useVuelidate(),
-    }
-  },
-  data () {
-    return {
-      validationErrors,
     }
   },
   computed: {
@@ -139,25 +126,35 @@ export default {
           severity: this.machineImage.vendorHint.severity,
         })
       }
-      if (this.machineImage.expirationDate) {
+      if (this.machineImage.isExpirationWarning) {
         hints.push({
           type: 'text',
           hint: `Image version expires on: ${this.machineImage.expirationDateString}. Image update will be enforced after that date.`,
           severity: 'warning',
         })
       }
-      if (this.updateOSMaintenance && this.selectedImageIsNotLatest) {
-        hints.push({
-          type: 'text',
-          hint: 'If you select a version which is not the latest (except for preview versions), you should disable automatic operating system updates',
-          severity: 'info',
-        })
-      }
-      if (this.updateOSMaintenance && this.machineImage.isPreview) {
+      if (this.machineImage.isPreview) {
         hints.push({
           type: 'text',
           hint: 'Preview versions have not yet undergone thorough testing. There is a higher probability of undiscovered issues and are therefore not recommended for production usage',
           severity: 'warning',
+        })
+      }
+      if (this.machineImage.isDeprecated) {
+        const hint = this.machineImage.expirationDate
+          ? `This image version is deprecated. It will expire on ${this.machineImage.expirationDateString}`
+          : 'This image version is deprecated'
+        hints.push({
+          type: 'text',
+          hint,
+          severity: 'warning',
+        })
+      }
+      if (this.autoUpdate && this.machineImageHasUpdate) {
+        hints.push({
+          type: 'text',
+          hint: 'You selected a version that is eligible for an automatic update. You should disable automatic operating system updates if you want to maintain this specific version',
+          severity: 'info',
         })
       }
       if (this.notInList) {
@@ -169,42 +166,25 @@ export default {
       }
       return JSON.stringify(hints)
     },
-    hintColor () {
-      if (this.machineImage.expirationDate ||
-         (this.updateOSMaintenance && this.selectedImageIsNotLatest) ||
-         this.machineImage.isPreview) {
-        return 'warning'
-      }
-      if (this.machineImage.vendorHint) {
-        return this.machineImage.vendorHint.hintType
-      }
-      return undefined
-    },
-    selectedImageIsNotLatest () {
-      return selectedImageIsNotLatest(this.machineImage, this.machineImages)
-    },
-    validators () {
-      return {
-        worker: {
-          machine: {
-            image: {
-              required,
-            },
-          },
-        },
-      }
+    machineImageHasUpdate () {
+      return machineImageHasUpdate(this.machineImage, this.machineImages)
     },
   },
   validations () {
-    return this.validators
+    return {
+      worker: {
+        machine: {
+          image: withFieldName(() => this.fieldName, {
+            required,
+          }),
+        },
+      },
+    }
   },
   mounted () {
     this.v$.$touch()
   },
   methods: {
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
     onInputMachineImage () {
       this.v$.worker.machine.image.$touch()
       this.$emit('updateMachineImage', this.worker.machine.image)
@@ -219,6 +199,7 @@ export default {
       }
       return join(itemDescription, ' | ')
     },
+    getErrorMessages,
   },
 }
 </script>

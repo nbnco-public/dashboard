@@ -4,12 +4,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-import { Buffer } from 'buffer'
-
+import { Base64 } from 'js-base64'
 import semver from 'semver'
 import {
-  nextTick,
   unref,
+  nextTick,
 } from 'vue'
 
 import { useLogger } from '@/composables/useLogger'
@@ -21,29 +20,30 @@ import {
 } from './crypto'
 import TimeWithOffset from './TimeWithOffset'
 
-import {
-  capitalize,
-  replace,
-  get,
-  head,
-  map,
-  toLower,
-  filter,
-  words,
-  find,
-  some,
-  sortBy,
-  isEmpty,
-  includes,
-  split,
-  join,
-  sample,
-  compact,
-  forEach,
-  omit,
-} from '@/lodash'
+import capitalize from 'lodash/capitalize'
+import replace from 'lodash/replace'
+import get from 'lodash/get'
+import set from 'lodash/set'
+import head from 'lodash/head'
+import map from 'lodash/map'
+import toLower from 'lodash/toLower'
+import filter from 'lodash/filter'
+import words from 'lodash/words'
+import find from 'lodash/find'
+import some from 'lodash/some'
+import sortBy from 'lodash/sortBy'
+import isEmpty from 'lodash/isEmpty'
+import includes from 'lodash/includes'
+import split from 'lodash/split'
+import join from 'lodash/join'
+import sample from 'lodash/sample'
+import compact from 'lodash/compact'
+import forEach from 'lodash/forEach'
+import omit from 'lodash/omit'
 
 const serviceAccountRegex = /^system:serviceaccount:([^:]+):([^:]+)$/
+const colorCodeRegex = /^#([a-f0-9]{6}|[a-f0-9]{3})$/i
+
 const logger = useLogger()
 
 export function emailToDisplayName (value) {
@@ -88,35 +88,8 @@ export function handleTextFieldDrop (textField, fileTypePattern, onDrop = () => 
   textarea.addEventListener('drop', drop, false)
 }
 
-export function getValidationErrors (vm, field) {
-  const errors = []
-  const validationForField = get(vm.v$, field)
-  if (!validationForField.$dirty) {
-    return errors
-  }
-
-  const validators = vm.validators
-    ? vm.validators
-    : vm.$options.validations
-  Object
-    .keys(get(validators, field))
-    .forEach(key => {
-      if (validationForField[key]?.$invalid) {
-        let validationErrorMessage = get(vm.validationErrors, field)[key]
-        if (typeof validationErrorMessage === 'function') {
-          validationErrorMessage = validationErrorMessage(get(validationForField.$params, key))
-        }
-        if (validationErrorMessage) {
-          errors.push(validationErrorMessage)
-        } else {
-          /* Fallback logic with generic error message.
-            This should not happen as for each validation there must be a corresponding text */
-          errors.push('Invalid input')
-          logger.error('validation error message for ' + field + '.' + key + ' not found')
-        }
-      }
-    })
-  return errors
+export function getErrorMessages (property) {
+  return property.$errors.map(e => e.$message)
 }
 
 export function setDelayedInputFocus (...args) {
@@ -129,7 +102,7 @@ export function setDelayedInputFocus (...args) {
 
 export function setInputFocus (vm, fieldName, options) {
   if (typeof fieldName === 'string') {
-    vm = vm.$refs[fieldName]
+    vm = get(vm.$refs, fieldName)
   } else {
     vm = unref(vm)
     options = fieldName
@@ -177,22 +150,104 @@ export function displayName (username) {
   return username
 }
 
-export function parseSize (value) {
+export function convertToGibibyte (value) {
   if (!value) {
+    throw new TypeError('Value is empty')
+  }
+  if (typeof value === 'number') {
+    value = value.toString()
+  }
+
+  value = value.trim().toLowerCase()
+  let size = ''
+  let unit = ''
+  let isFloat = false
+
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i] // eslint-disable-line security/detect-object-injection -- loop variable is controlled
+    if (c >= '0' && c <= '9') {
+      size += c
+    } else if (c === '.' && !isFloat) {
+      isFloat = true
+      size += c
+    } else {
+      unit = value.slice(i)
+      break
+    }
+  }
+
+  if (size === '') {
+    throw new TypeError('Invalid value')
+  }
+
+  const num = parseFloat(size)
+
+  if (unit === '') {
+    return num * 1e9 / Math.pow(2, 6 * 10)
+  }
+
+  const multipliers = {
+    k: 1e9 * Math.pow(1024, -5),
+    m: 1e9 * Math.pow(1024, -4),
+    g: 1e9 * Math.pow(1024, -3),
+    t: 1e9 * Math.pow(1024, -2),
+    p: 1e9 * Math.pow(1024, -1),
+    e: 1e9 * Math.pow(1024, 0),
+    ki: Math.pow(1024, -2),
+    mi: Math.pow(1024, -1),
+    gi: Math.pow(1024, 0),
+    ti: Math.pow(1024, 1),
+    pi: Math.pow(1024, 2),
+    ei: Math.pow(1024, 3),
+  }
+
+  if (!(unit in multipliers)) {
+    throw new TypeError('Invalid value')
+  }
+
+  return num * multipliers[unit] // eslint-disable-line security/detect-object-injection -- value of unit is validated
+}
+
+export function convertToGi (value) {
+  try {
+    return convertToGibibyte(value)
+  } catch (err) {
+    logger.error('Failed to convert value %s to GiB: %s', value, err.message)
     return 0
   }
-  const sizeRegex = /^(\d+)Gi$/
-  const result = sizeRegex.exec(value)
-  if (result) {
-    const [, sizeValue] = result
-    return parseInt(sizeValue, 10)
-  }
-  logger.error(`Could not parse size ${value} as it does not match regex ^(\\d+)Gi$`)
-  return 0
 }
 
 export function isEmail (value) {
-  return /^[a-zA-Z0-9.!#$%&’*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/.test(value)
+  if (typeof value !== 'string' || value.length > 320) {
+    return false
+  }
+
+  const parts = value.split('@')
+  if (parts.length !== 2) {
+    return false
+  }
+
+  const [local, domain] = parts
+  if (!/^[a-zA-Z0-9.!#$%&’*+/=?^_`{|}~-]{1,64}$/.test(local)) {
+    return false
+  }
+
+  const domainParts = domain.split('.')
+  if (domainParts.length < 2) {
+    return false
+  }
+  const lastIndex = domainParts.length - 1
+  const isValidPart = (part, index) => {
+    const minLength = index < lastIndex ? 1 : 2
+    return part.length < minLength || part.length > 63
+      ? false
+      : /^[a-zA-Z0-9-]*$/.test(part)
+  }
+  if (!domainParts.every(isValidPart)) {
+    return false
+  }
+
+  return true
 }
 
 export function gravatarUrlGeneric (username, size = 128) {
@@ -272,9 +327,8 @@ export function routeName (route) {
 export function getDateFormatted (timestamp) {
   if (!timestamp) {
     return undefined
-  } else {
-    return moment(timestamp).format('YYYY-MM-DD')
   }
+  return moment(timestamp).format('YYYY-MM-DD')
 }
 
 export function getTimestampFormatted (timestamp) {
@@ -287,25 +341,19 @@ export function getTimestampFormatted (timestamp) {
 export function getTimeStringFrom (time, fromTime, withoutSuffix = false) {
   if (!time) {
     return undefined
-  } else {
-    return moment(time).from(fromTime, withoutSuffix)
   }
+  return moment(time).from(fromTime, withoutSuffix)
 }
 
 export function getTimeStringTo (time, toTime, withoutPrefix = false) {
   if (!time) {
     return undefined
-  } else {
-    if (time.getTime() === toTime.getTime()) {
-      // Equal dates result in text "a few seconds ago", this is not we want here...
-      toTime.setSeconds(toTime.getSeconds() + 1)
-    }
-    return moment(time).to(toTime, withoutPrefix)
   }
+  return moment(time).to(toTime, withoutPrefix)
 }
 
-export function isOwnSecret (infrastructureSecret) {
-  return get(infrastructureSecret, 'metadata.secretRef.namespace') === get(infrastructureSecret, 'metadata.namespace')
+export function hasOwnSecret (secretBinding) {
+  return get(secretBinding, ['secretRef', 'namespace']) === get(secretBinding, ['metadata', 'namespace'])
 }
 
 export function getCreatedBy (metadata) {
@@ -314,62 +362,27 @@ export function getCreatedBy (metadata) {
 
 export function getIssueSince (shootStatus) {
   const issueTimestamps = []
-  const lastOperation = get(shootStatus, 'lastOperation', {})
+  const lastOperation = get(shootStatus, ['lastOperation'], {})
   if (lastOperation.state === 'False') {
     issueTimestamps.push(lastOperation.lastUpdateTime)
   }
-  forEach([...get(shootStatus, 'conditions', []), ...get(shootStatus, 'constraints', [])], readiness => {
+  forEach([...get(shootStatus, ['conditions'], []), ...get(shootStatus, ['constraints'], [])], readiness => {
     if (readiness.status !== 'True') {
       issueTimestamps.push(readiness.lastTransitionTime)
     }
   })
-  forEach(get(shootStatus, 'lastErrors'), lastError => {
+  forEach(get(shootStatus, ['lastErrors']), lastError => {
     issueTimestamps.push(lastError.lastUpdateTime)
   })
   return head(issueTimestamps.sort())
 }
 
-export function getProjectDetails (project = {}) {
-  const projectData = project.data || {}
-  const projectMetadata = project.metadata || {}
-  const projectName = projectMetadata.name || ''
-  const owner = projectData.owner || ''
-  const costObject = get(project, ['metadata', 'annotations', 'billing.gardener.cloud/costObject'], '')
-  const creationTimestamp = projectMetadata.creationTimestamp
-  const createdAt = getDateFormatted(creationTimestamp)
-  const description = projectData.description || ''
-  const createdBy = projectData.createdBy || ''
-  const purpose = projectData.purpose || ''
-  const staleSinceTimestamp = projectData.staleSinceTimestamp
-  const staleAutoDeleteTimestamp = projectData.staleAutoDeleteTimestamp
-  const phase = projectData.phase
-
-  return {
-    projectName,
-    owner,
-    costObject,
-    createdAt,
-    creationTimestamp,
-    createdBy,
-    description,
-    purpose,
-    staleSinceTimestamp,
-    staleAutoDeleteTimestamp,
-    phase,
-  }
-}
-
-export function isShootStatusHibernated (status) {
-  return get(status, 'hibernated', false)
-}
-
-export function shootHasIssue (shoot) {
-  return get(shoot, ['metadata', 'labels', 'shoot.gardener.cloud/status'], 'healthy') !== 'healthy'
+export function isStatusHibernated (status) {
+  return get(status, ['hibernated'], false)
 }
 
 export function isReconciliationDeactivated (metadata) {
-  const ignoreDeprecated = get(metadata, ['annotations', 'shoot.garden.sapcloud.io/ignore'])
-  const ignore = get(metadata, ['annotations', 'shoot.gardener.cloud/ignore'], ignoreDeprecated)
+  const ignore = get(metadata, ['annotations', 'shoot.gardener.cloud/ignore'])
   return isTruthyValue(ignore)
 }
 
@@ -390,11 +403,11 @@ export function isSelfTerminationWarning (expirationTimestamp) {
 }
 
 export function isValidTerminationDate (expirationTimestamp) {
-  return expirationTimestamp && new Date(expirationTimestamp) > new Date()
+  return !!expirationTimestamp && new Date(expirationTimestamp) > new Date()
 }
 
 export function isTypeDelete (lastOperation) {
-  return get(lastOperation, 'type') === 'Delete'
+  return get(lastOperation, ['type']) === 'Delete'
 }
 
 export function isServiceAccountUsername (username) {
@@ -420,7 +433,7 @@ export function parseServiceAccountUsername (username) {
 }
 
 export function encodeBase64 (input) {
-  return Buffer.from(input, 'utf8').toString('base64')
+  return Base64.encode(input)
 }
 
 export function encodeBase64Url (input) {
@@ -429,6 +442,10 @@ export function encodeBase64Url (input) {
   output = output.replace(/\+/g, '-')
   output = output.replace(/\//g, '_')
   return output
+}
+
+export function decodeBase64 (input) {
+  return Base64.decode(input)
 }
 
 export function shortRandomString (length) {
@@ -441,12 +458,12 @@ export function shortRandomString (length) {
   return text
 }
 
-export function selfTerminationDaysForSecret (secret) {
+export function selfTerminationDaysForSecret (secretBinding) {
   const clusterLifetimeDays = function (quotas, scope) {
-    return get(find(quotas, scope), 'spec.clusterLifetimeDays')
+    return get(find(quotas, scope), ['spec', 'clusterLifetimeDays'])
   }
 
-  const quotas = get(secret, 'quotas')
+  const quotas = get(secretBinding, ['_quotas'])
   let terminationDays = clusterLifetimeDays(quotas, { spec: { scope: { apiVersion: 'core.gardener.cloud/v1beta1', kind: 'Project' } } })
   if (!terminationDays) {
     terminationDays = clusterLifetimeDays(quotas, { spec: { scope: { apiVersion: 'v1', kind: 'Secret' } } })
@@ -455,22 +472,18 @@ export function selfTerminationDaysForSecret (secret) {
   return terminationDays
 }
 
-export function purposesForSecret (secret) {
-  return selfTerminationDaysForSecret(secret) ? ['evaluation'] : ['evaluation', 'development', 'testing', 'production']
-}
-
 export const shootAddonList = [
   {
     name: 'kubernetesDashboard',
     title: 'Dashboard',
-    description: 'General-purpose web UI for Kubernetes clusters. Several high-profile attacks have shown weaknesses, so installation is not recommend, especially not for production clusters.',
+    description: 'The general-purpose web UI for Kubernetes clusters has exhibited vulnerabilities in several high-profile attacks, making its installation not recommended.',
     visible: true,
     enabled: false,
   },
   {
     name: 'nginxIngress',
     title: 'Nginx Ingress',
-    description: 'Default ingress-controller with static configuration and conservatively sized (cannot be changed). Therefore, it is not recommended for production clusters. We recommend alternatively to install an ingress-controller of your liking, which you can freely configure, program, and scale to your production needs.',
+    description: 'The default ingress controller has a static configuration and a conservative size, which cannot be changed. For production clusters, we recommend installing an alternative ingress controller of your choice, which you can freely configure, program, and scale according to your production needs.',
     visible: true,
     enabled: false,
   },
@@ -561,21 +574,6 @@ export function defaultCriNameByKubernetesVersion (criNames, kubernetesVersion) 
     ? criName
     : head(criNames)
 }
-export function isZonedCluster ({ cloudProviderKind, shootSpec, isNewCluster }) {
-  switch (cloudProviderKind) {
-    case 'azure':
-      if (isNewCluster) {
-        return true // new clusters are always created as zoned clusters by the dashboard
-      }
-      return get(shootSpec, 'provider.infrastructureConfig.zoned', false)
-    case 'metal':
-      return false // metal clusters do not support zones for worker groups
-    case 'local':
-      return false // local development provider does not support zones
-    default:
-      return true
-  }
-}
 
 export const MEMBER_ROLE_DESCRIPTORS = [
   {
@@ -639,12 +637,28 @@ export function targetText (target) {
   }
 }
 
-export function selectedImageIsNotLatest (machineImage, machineImages) {
-  const { version: testImageVersion, vendorName: testVendor } = machineImage
+const allowedSemverDiffs = {
+  patch: ['patch'],
+  minor: ['patch', 'minor'],
+  major: ['patch', 'minor', 'major'],
+}
 
+export function machineImageHasUpdate (machineImage, machineImages) {
+  let { updateStrategy } = machineImage
+  if (!Object.keys(allowedSemverDiffs).includes(updateStrategy)) {
+    updateStrategy = 'major'
+  }
   return some(machineImages, ({ version, vendorName, isSupported }) => {
-    return testVendor === vendorName && semver.gt(version, testImageVersion) && isSupported
+    return isSupported &&
+      machineImage.vendorName === vendorName &&
+      semver.gt(version, machineImage.version) &&
+      get(allowedSemverDiffs, [updateStrategy], []).includes(semver.diff(version, machineImage.version))
   })
+}
+
+export function machineVendorHasSupportedVersion (machineImage, machineImages) {
+  const { vendorName, isSupported } = machineImage
+  return some(machineImages, { vendorName, isSupported })
 }
 
 export const UNKNOWN_EXPIRED_TIMESTAMP = '1970-01-01T00:00:00Z'
@@ -656,14 +670,18 @@ export function sortedRoleDisplayNames (roleNames) {
 
 export function mapTableHeader (headers, valueKey) {
   const obj = {}
-  for (const { key, [valueKey]: value } of headers) {
-    obj[key] = value
+  for (const header of headers) {
+    const {
+      key,
+      [valueKey]: value,
+    } = header
+    set(obj, [key], value)
   }
   return obj
 }
 
 export function isHtmlColorCode (value) {
-  return /^#([a-f0-9]{6}|[a-f0-9]{3})$/i.test(value)
+  return colorCodeRegex.test(value)
 }
 
 export class Shortcut {
@@ -681,4 +699,39 @@ export class Shortcut {
 export function omitKeysWithSuffix (obj, suffix) {
   const keys = Object.keys(obj).filter(key => key.endsWith(suffix))
   return omit(obj, keys)
+}
+
+export function parseNumberWithMagnitudeSuffix (abbreviatedNumber) {
+  let number = abbreviatedNumber
+  let suffix = ''
+  if (/[kmbt]$/i.test(abbreviatedNumber)) {
+    suffix = abbreviatedNumber.slice(-1)
+    number = abbreviatedNumber.slice(0, -1)
+  }
+  number = Number(number)
+  if (isNaN(number)) {
+    logger.error(`Failed to parse ${abbreviatedNumber} because it doesn't follow the required format: a number optionally with a decimal, followed by an optional magnitude suffix ('k', 'm', 'b', 't').`)
+    return null
+  }
+
+  const suffixFactors = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 }
+  const factor = suffixFactors[suffix?.toLowerCase()] ?? 1
+  return number * factor
+}
+
+export function normalizeVersion (version) {
+  let suffix = ''
+
+  const index = version.search(/[+-]/)
+  if (index !== -1) {
+    suffix = version.substring(index)
+    version = version.substring(0, index)
+  }
+
+  const parts = version.split('.')
+  if (!parts.every(part => /^\d+$/.test(part))) {
+    return
+  }
+  const [major, minor = '0', patch = '0'] = parts
+  return [major, minor, patch].map(Number).join('.') + suffix
 }

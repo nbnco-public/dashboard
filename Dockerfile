@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 ############# builder #############
-FROM node:20-alpine3.18 as builder
+FROM node:22-alpine3.20 AS builder
 
 WORKDIR /volume
 
@@ -36,25 +36,10 @@ COPY . .
 RUN yarn config set enableNetwork false
 RUN yarn install --immutable --immutable-cache
 
-# check that the constraints are met
-RUN yarn constraints
-
-# run lint
-RUN yarn workspace @gardener-dashboard/logger run lint
-RUN yarn workspace @gardener-dashboard/request run lint
-RUN yarn workspace @gardener-dashboard/kube-config run lint
-RUN yarn workspace @gardener-dashboard/kube-client run lint
-
-# run test --coverage
-RUN yarn workspace @gardener-dashboard/logger run test --coverage
-RUN yarn workspace @gardener-dashboard/request run test --coverage
-RUN yarn workspace @gardener-dashboard/kube-config run test --coverage
-RUN yarn workspace @gardener-dashboard/kube-client run test --coverage
-
 ############# node-scratch #############
-FROM scratch as node-scratch
+FROM scratch AS node-scratch
 
-ENV NODE_ENV "production"
+ENV NODE_ENV="production"
 
 COPY --from=builder /volume /
 
@@ -67,15 +52,7 @@ VOLUME ["/home/node"]
 ENTRYPOINT [ "tini", "--", "node"]
 
 ############# dashboard-builder #############
-FROM builder as dashboard-builder
-
-# run lint
-RUN yarn workspace @gardener-dashboard/backend run lint
-RUN yarn workspace @gardener-dashboard/frontend run lint
-
-# run test --coverage
-RUN yarn workspace @gardener-dashboard/backend run test --coverage
-RUN yarn workspace @gardener-dashboard/frontend run test --coverage
+FROM builder AS dashboard-builder
 
 # bump version
 RUN yarn workspace @gardener-dashboard/backend version "$(cat VERSION)"
@@ -91,7 +68,7 @@ RUN yarn workspace @gardener-dashboard/backend prod-install --pack /app/dist \
     && chown -R 1000:1000  /app/dist
 
 ############# dashboard #############
-FROM node-scratch as dashboard
+FROM node-scratch AS dashboard
 
 COPY --from=dashboard-builder /app/dist .
 

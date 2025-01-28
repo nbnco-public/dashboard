@@ -5,44 +5,43 @@
 //
 
 import { helpers } from '@vuelidate/validators'
+import { Base64 } from 'js-base64'
 
-import {
-  includes,
-  get,
-} from '@/lodash'
+import get from 'lodash/get'
+import set from 'lodash/set'
+import includes from 'lodash/includes'
 
-const { withParams, regex, req } = helpers
+const { withParams, regex, withMessage } = helpers
 
-const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
-const uppercaseAlphaNumPattern = /^[A-Z0-9]+$/
 const alphaNumUnderscorePattern = /^\w+$/
-const alphaNumUnderscoreHyphenPattern = /^[a-zA-Z0-9-_]+$/
-const resourceNamePattern = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/
+const lowerCaseAlphaNumHyphenPattern = /^[-a-z0-9]*$/
 const consecutiveHyphenPattern = /.?-{2,}.?/
 const startEndHyphenPattern = /^-.*.|.*-$/
 const numberOrPercentagePattern = /^[\d]+[%]?$/
+const guidPattern = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/
 export const timezonePattern = /^([+-])(\d{2}):(\d{2})$/
 
-const base64 = regex(base64Pattern)
-const uppercaseAlphaNum = regex(uppercaseAlphaNumPattern)
-const alphaNumUnderscore = regex(alphaNumUnderscorePattern)
-const alphaNumUnderscoreHyphen = regex(alphaNumUnderscoreHyphenPattern)
-const resourceName = regex(resourceNamePattern)
-const noConsecutiveHyphen = (value) => {
+const base64 = withMessage('Must be a valid base64 string', value => {
+  return Base64.isValid(value)
+})
+const alphaNumUnderscore = withMessage('Must contain only alphanumeric characters and underscore', regex(alphaNumUnderscorePattern))
+const lowerCaseAlphaNumHyphen = withMessage('Must contain only lowercase alphanumeric characters or hyphen', regex(lowerCaseAlphaNumHyphenPattern))
+const noConsecutiveHyphen = withMessage('Must not contain consecutive hyphens', value => {
   return !consecutiveHyphenPattern.test(value)
-}
-const noStartEndHyphen = (value) => {
+})
+const noStartEndHyphen = withMessage('Must not start or end with a hyphen', value => {
   return !startEndHyphenPattern.test(value)
-}
-const numberOrPercentage = (value) => {
+})
+const numberOrPercentage = withMessage('Must be a number or percentage', value => {
   return numberOrPercentagePattern.test(value)
-}
+})
+const guid = withMessage('Must be a valid GUID', regex(guidPattern))
 
-const isTimezone = (value) => {
+const isTimezone = withMessage('TimeZone must have format [+|-]HH:mm', value => {
   return timezonePattern.test(value)
-}
+})
 
-const unique = key => withParams(
+const unique = key => withMessage(`Value of property '${key}' must be unique`, withParams(
   { type: 'unique', key },
   function unique (value) {
     const keys = this[
@@ -52,69 +51,55 @@ const unique = key => withParams(
     ]
     return !includes(keys, value)
   },
-)
+))
 
-const uniqueWorkerName = withParams(
-  { type: 'uniqueWorkerName' },
-  function unique (value) {
-    return this.workers.filter(item => item.name === value).length === 1
-  },
-)
+const includesIfAvailable = (key, reference) => withMessage(`Value of property '${key}' must be selected`,
+  withParams(
+    { type: 'includesIfAvailable', key },
+    function includesIfAvailable (selectedKeys) {
+      const availableKeys = get(this, [reference])
+      return includes(availableKeys, key) ? includes(selectedKeys, key) : true
+    },
+  ))
 
-const requiresCostObjectIfEnabled = withParams(
-  { type: 'requiresCostObjectIfEnabled' },
-  function requiresCostObjectIfEnabled (infrastructureSecret) {
-    if (!this.costObjectSettingEnabled) {
-      return true
+const withFieldName = (fieldName, validators) => {
+  for (const [key, validator] of Object.entries(validators)) {
+    if (typeof fieldName === 'function') {
+      fieldName = fieldName.call(this)
     }
-    return get(infrastructureSecret, 'metadata.hasCostObject', false)
-  },
-)
+    set(validators, [key], withParams({ fieldName }, validator))
+  }
+  return validators
+}
 
-const serviceAccountKey = withParams(
-  { type: 'serviceAccountKey' },
-  function serviceAccountKey (value) {
-    try {
-      const key = JSON.parse(value)
-      if (key.project_id && alphaNumUnderscoreHyphen(key.project_id)) {
-        return true
-      }
-    } catch (err) { /* ignore error */ }
-    return false
-  },
-)
+const messageFromErrors = errors => {
+  const errorMessages = []
+  if (errors) {
+    errors.forEach(error => {
+      errorMessages.push({
+        fieldName: error.$params.fieldName ? error.$params.fieldName : error.$propertyPath,
+        message: error.$message,
+      })
+    })
+  }
 
-const includesIfAvailable = (key, reference) => withParams(
-  { type: 'includesIfAvailable', key },
-  function includesIfAvailable (selectedKeys) {
-    const availableKeys = this[reference]
-    return includes(availableKeys, key) ? includes(selectedKeys, key) : true
-  },
-)
-
-const nilUnless = key => withParams(
-  { type: 'nilUnless', key },
-  function nilUnless (value) {
-    return !this[key] ? !req(value) : true
-  },
-)
+  return errorMessages.map(msg => `${msg.fieldName}: ${msg.message}`).join(', ')
+}
 
 export {
   withParams,
+  withMessage,
+  withFieldName,
+  messageFromErrors,
   regex,
   unique,
-  uppercaseAlphaNum,
   alphaNumUnderscore,
-  alphaNumUnderscoreHyphen,
   base64,
-  resourceName,
+  lowerCaseAlphaNumHyphen,
   noConsecutiveHyphen,
   noStartEndHyphen,
-  serviceAccountKey,
   includesIfAvailable,
-  uniqueWorkerName,
   numberOrPercentage,
-  requiresCostObjectIfEnabled,
   isTimezone,
-  nilUnless,
+  guid,
 }

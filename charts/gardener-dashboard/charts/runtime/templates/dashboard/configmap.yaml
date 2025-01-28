@@ -34,6 +34,7 @@ data:
     {{- if .Values.global.dashboard.clusterIdentity }}
     clusterIdentity: {{ .Values.global.dashboard.clusterIdentity }}
     {{- end }}
+    maxRequestBodySize: {{ .Values.global.dashboard.maxRequestBodySize | default "100kb" }}
     readinessProbe:
       periodSeconds: {{ .Values.global.dashboard.readinessProbe.periodSeconds }}
     {{- if .Values.global.dashboard.gitHub }}
@@ -54,7 +55,7 @@ data:
     unreachableSeeds:
       {{- with .Values.global.unreachableSeeds.matchLabels }}
       matchLabels:
-{{ toYaml . | trim | indent 8 }}
+{{ toYaml . | trim | nindent 8 }}
       {{- end }}
     {{- end }}
     contentSecurityPolicy:
@@ -76,9 +77,15 @@ data:
       sessionLifetime: {{ .Values.global.dashboard.oidc.sessionLifetime }}
       {{- end }}
       redirect_uris:
+      {{- if .Values.global.dashboard.oidc.redirectUris }}
+      {{- range .Values.global.dashboard.oidc.redirectUris }}
+      - "{{ . }}"
+      {{- end }}
+      {{- else }}
       {{- $protocol := ternary "http" "https" ( empty .Values.global.dashboard.ingress.tls ) }}
       {{- range .Values.global.dashboard.ingress.hosts }}
       - "{{ $protocol }}://{{ . }}/auth/callback"
+      {{- end }}
       {{- end }}
       {{- if .Values.global.dashboard.oidc.scope }}
       scope: {{ .Values.global.dashboard.oidc.scope }}
@@ -128,15 +135,6 @@ data:
       serviceAccountTokenExpiration: {{ .Values.global.terminal.serviceAccountTokenExpiration }}
       {{- end }}
       gardenTerminalHost:
-        {{- if .Values.global.terminal.gardenTerminalHost.secretRef }}
-        apiServerIngressHost: {{ .Values.global.terminal.gardenTerminalHost.apiServerIngressHost }}
-        secretRef:
-          namespace: {{ .Values.global.terminal.gardenTerminalHost.secretRef.namespace }}
-          {{- with .Values.global.terminal.gardenTerminalHost.secretRef.labelSelector }}
-          labelSelector:
-{{ toYaml . | trim | indent 12 }}
-          {{- end }}
-        {{- end }}
         {{- if .Values.global.terminal.gardenTerminalHost.seedRef }}
         seedRef: {{ .Values.global.terminal.gardenTerminalHost.seedRef }}
         {{- end }}
@@ -147,7 +145,7 @@ data:
         {{- end }}
       garden:
         operatorCredentials:
-{{ toYaml .Values.global.terminal.garden.operatorCredentials | trim | indent 10 }}
+{{ toYaml .Values.global.terminal.garden.operatorCredentials | trim | nindent 10 }}
         {{- if .Values.global.terminal.garden.roleBindings }}
         roleBindings:
         {{- range .Values.global.terminal.garden.roleBindings }}
@@ -191,19 +189,18 @@ data:
           - {{ . }}
           {{- end }}
         {{- end }}
-        {{- if .Values.global.dashboard.frontendConfig.ticket.newTicketLabels }}
-        newTicketLabels:
-          {{- range .Values.global.dashboard.frontendConfig.ticket.newTicketLabels }}
-          - {{ . }}
-          {{- end }}
-        {{- end }}
         gitHubRepoUrl: {{ .Values.global.dashboard.frontendConfig.ticket.gitHubRepoUrl }}
         avatarSource: {{ .Values.global.dashboard.frontendConfig.ticket.avatarSource | default "github" }}
-        issueDescriptionTemplate: {{ quote .Values.global.dashboard.frontendConfig.ticket.issueDescriptionTemplate }}
+        {{- if .Values.global.dashboard.frontendConfig.ticket.newIssue }}
+        newIssue: {{ toYaml .Values.global.dashboard.frontendConfig.ticket.newIssue | trim | nindent 10 }}
+        {{- end }}
       {{- end }}
       features:
         terminalEnabled: {{ .Values.global.dashboard.frontendConfig.features.terminalEnabled | default false }}
         projectTerminalShortcutsEnabled: {{ .Values.global.dashboard.frontendConfig.features.projectTerminalShortcutsEnabled | default false }}
+        oidcObservabilityUrlsEnabled: {{ .Values.global.dashboard.frontendConfig.features.oidcObservabilityUrlsEnabled | default false }}
+      experimental:
+        throttleDelayPerCluster: {{ .Values.global.dashboard.frontendConfig.experimental.throttleDelayPerCluster | default 10 }}
       {{- if .Values.global.dashboard.frontendConfig.terminal }}
       terminal:
         {{- if .Values.global.dashboard.frontendConfig.terminal.heartbeatIntervalSeconds }}
@@ -238,7 +235,11 @@ data:
       {{- end }}
       {{- if .Values.global.dashboard.frontendConfig.defaultHibernationSchedule }}
       defaultHibernationSchedule:
-{{ toYaml .Values.global.dashboard.frontendConfig.defaultHibernationSchedule | trim | indent 8 }}
+{{ toYaml .Values.global.dashboard.frontendConfig.defaultHibernationSchedule | trim | nindent 8 }}
+      {{- end }}
+      {{- if .Values.global.dashboard.frontendConfig.shootAdminKubeconfig }}
+      shootAdminKubeconfig:
+{{ toYaml .Values.global.dashboard.frontendConfig.shootAdminKubeconfig | trim | nindent 8 }}
       {{- end }}
       {{- if .Values.global.dashboard.frontendConfig.seedCandidateDeterminationStrategy }}
       seedCandidateDeterminationStrategy: {{ .Values.global.dashboard.frontendConfig.seedCandidateDeterminationStrategy }}
@@ -251,12 +252,15 @@ data:
         identifier: {{ .Values.global.dashboard.frontendConfig.alert.identifier }}
         {{- end }}
       {{- end }}
-      {{- if .Values.global.dashboard.frontendConfig.costObject }}
-      costObject:
-        title: {{ .Values.global.dashboard.frontendConfig.costObject.title }}
-        description: {{ .Values.global.dashboard.frontendConfig.costObject.description }}
-        regex: {{ .Values.global.dashboard.frontendConfig.costObject.regex }}
-        errorMessage: {{ .Values.global.dashboard.frontendConfig.costObject.errorMessage }}
+      {{- if .Values.global.dashboard.frontendConfig.costObjects }}
+      costObjects:
+      {{- range .Values.global.dashboard.frontendConfig.costObjects }}
+      - type: {{ required ".Values.global.dashboard.frontendConfig.costObjects.type is required" (quote .type) }}
+        title: {{ required ".Values.global.dashboard.frontendConfig.costObjects.title is required" (quote .title) }}
+        description: {{ quote .description }}
+        regex: {{ quote .regex }}
+        errorMessage: {{ quote .errorMessage }}
+      {{- end }}
       {{- end }}
       {{- if .Values.global.dashboard.frontendConfig.sla }}
       sla:
@@ -271,26 +275,27 @@ data:
         items:
         {{- range .Values.global.dashboard.frontendConfig.accessRestriction.items }}
         - key: {{ .key }}
+          {{- if .display }}
           display:
-            visibleIf: {{ .display.visibleIf }}{{- if .display.title }}
+            {{- if .display.title }}
             title: {{ .display.title }}{{- end }}{{- if .display.description }}
             description: {{ .display.description }}{{- end }}
+          {{- end }}
           input:
             title: {{ quote .input.title }}
             {{- if .input.description }}
             description: {{ quote .input.description }}
             {{- end }}
-            {{- if .input.inverted }}
-            inverted: {{ .input.inverted }}
-            {{- end }}
           {{- if .options }}
           options:
           {{- range .options }}
           - key: {{ .key }}
+            {{- if .display }}
             display:
               visibleIf: {{ .display.visibleIf }}{{- if .display.title }}
               title: {{ .display.title }}{{- end }}{{- if .display.description }}
               description: {{ .display.description }}{{- end }}
+            {{- end }}
             input:
               title: {{ quote .input.title }}
               {{- if .input.description }}

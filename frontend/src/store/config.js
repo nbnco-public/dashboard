@@ -18,11 +18,10 @@ import { useApi } from '@/composables/useApi'
 
 import { hash } from '@/utils/crypto'
 
-import {
-  get,
-  isEmpty,
-  camelCase,
-} from '@/lodash'
+import map from 'lodash/map'
+import get from 'lodash/get'
+import isEmpty from 'lodash/isEmpty'
+import camelCase from 'lodash/camelCase'
 
 const wellKnownConditions = {
   APIServerAvailable: {
@@ -38,17 +37,17 @@ const wellKnownConditions = {
     showAdminOnly: true,
     sortOrder: '1',
   },
-  EveryNodeReady: {
-    name: 'Nodes',
-    shortName: 'N',
-    description: 'Indicates whether all nodes registered to the cluster are healthy and up-to-date. If this is in error state there then there is probably an issue with the cluster nodes. In worst case there is currently not enough capacity to schedule all the workloads/pods running in the cluster and that might cause a service disruption of your applications.',
-    sortOrder: '3',
-  },
   SystemComponentsHealthy: {
     name: 'System Components',
     shortName: 'SC',
     description: 'Indicates whether all system components in the kube-system namespace are up and running. Gardener manages these system components and should automatically take care that the components become healthy again.',
     sortOrder: '2',
+  },
+  EveryNodeReady: {
+    name: 'Nodes',
+    shortName: 'N',
+    description: 'Indicates whether all nodes registered to the cluster are healthy and up-to-date. If this is in error state there then there is probably an issue with the cluster nodes. In worst case there is currently not enough capacity to schedule all the workloads/pods running in the cluster and that might cause a service disruption of your applications.',
+    sortOrder: '3',
   },
   ObservabilityComponentsHealthy: {
     name: 'Observability Components',
@@ -68,11 +67,47 @@ const wellKnownConditions = {
     description: 'Indicates whether Gardener is able to hibernate this cluster. If you do not resolve this issue your hibernation schedule may not have any effect.',
     sortOrder: '6',
   },
+  BackupBucketsReady: {
+    name: 'Seed Backup Buckets',
+    shortName: 'BB',
+    description: 'Indicates that associated BackupBuckets are ready.',
+    sortOrder: '7',
+  },
+  ExtensionsReady: {
+    name: 'Seed Extensions',
+    shortName: 'E',
+    description: 'Indicates that the extensions are ready.',
+    sortOrder: '8',
+  },
+  GardenletReady: {
+    name: 'Seed Gardenlet',
+    shortName: 'G',
+    description: 'Indicates that the Gardenlet is ready.',
+    sortOrder: '9',
+  },
+  SeedSystemComponentsHealthy: {
+    name: 'Seed System Components',
+    shortName: 'SSC',
+    description: 'Indicates the system components health',
+    sortOrder: '10',
+  },
+  CRDsWithProblematicConversionWebhooks: {
+    name: 'CRDs with Problematic Conversion Webhooks',
+    shortName: 'CRD',
+    description: 'Indicates that there is at least one CustomResourceDefinition in the cluster which has multiple stored versions and a conversion webhook configured. This could break the reconciliation flow of a Shoot cluster in some cases.',
+    sortOrder: '11',
+  },
+  CACertificateValiditiesAcceptable: {
+    name: 'CA Certificate Validities',
+    shortName: 'CA',
+    description: 'Indicates that there is at least one CA certificate which expires in less than 1 year. A credentials rotation operation should be considered.',
+    sortOrder: '12',
+  },
 }
 
 export function getCondition (type) {
   if (type in wellKnownConditions) {
-    return wellKnownConditions[type]
+    return get(wellKnownConditions, [type])
   }
 
   let name = ''
@@ -114,7 +149,26 @@ export const useConfigStore = defineStore('config', () => {
   })
 
   const accessRestriction = computed(() => {
-    return state.value?.accessRestriction
+    // TODO(petersutter): remove mapping from seed.gardener.cloud/eu-access to eu-access-only in dashboard version >=1.80.0. Add breaking change release note.
+    const accessRestriction = state.value?.accessRestriction
+    if (!accessRestriction) {
+      return
+    }
+
+    const items = map(accessRestriction.items, item => {
+      if (item.key === 'seed.gardener.cloud/eu-access') {
+        return {
+          ...item,
+          key: 'eu-access-only',
+        }
+      }
+      return item
+    })
+
+    return {
+      ...accessRestriction,
+      items,
+    }
   })
 
   const sla = computed(() => {
@@ -129,12 +183,23 @@ export const useConfigStore = defineStore('config', () => {
     return state.value?.features
   })
 
+  const experimental = computed(() => {
+    return state.value?.experimental
+  })
+
   const grantTypes = computed(() => {
     return state.value?.grantTypes ?? ['auto', 'authcode', 'device-code']
   })
 
   const knownConditions = computed(() => {
     return state.value?.knownConditions
+  })
+
+  const allKnownConditions = computed(() => {
+    return {
+      ...wellKnownConditions,
+      ...knownConditions.value,
+    }
   })
 
   const resourceQuotaHelp = computed(() => {
@@ -195,6 +260,10 @@ export const useConfigStore = defineStore('config', () => {
     return state.value?.defaultNodesCIDR ?? '10.250.0.0/16'
   })
 
+  const shootAdminKubeconfig = computed(() => {
+    return state.value?.shootAdminKubeconfig
+  })
+
   const apiServerUrl = computed(() => {
     return state.value?.apiServerUrl ?? browserLocation.value.origin
   })
@@ -219,6 +288,18 @@ export const useConfigStore = defineStore('config', () => {
     return features.value?.projectTerminalShortcutsEnabled === true
   })
 
+  const isShootForceDeletionEnabled = computed(() => {
+    return features.value?.shootForceDeletionEnabled === true
+  })
+
+  const isOidcObservabilityUrlsEnabled = computed(() => {
+    return features.value?.oidcObservabilityUrlsEnabled === true
+  })
+
+  const throttleDelayPerCluster = computed(() => {
+    return experimental.value?.throttleDelayPerCluster ?? 10
+  })
+
   const alertBannerMessage = computed(() => {
     return alert.value?.message
   })
@@ -241,23 +322,27 @@ export const useConfigStore = defineStore('config', () => {
     return `cfg.${identifier}`
   })
 
-  const costObjectSettings = computed(() => {
-    const costObject = state.value?.costObject
-    if (!costObject) {
+  const costObjectsSettings = computed(() => {
+    const costObjects = state.value?.costObjects
+    if (!costObjects) {
       return undefined
     }
 
-    const title = costObject.title || ''
-    const description = costObject.description || ''
-    const regex = costObject.regex
-    const errorMessage = costObject.errorMessage
+    return map(costObjects, costObject => {
+      const type = costObject.type || ''
+      const title = costObject.title || ''
+      const description = costObject.description || ''
+      const regex = costObject.regex
+      const errorMessage = costObject.errorMessage
 
-    return {
-      regex,
-      title,
-      description,
-      errorMessage,
-    }
+      return {
+        type,
+        regex,
+        title,
+        description,
+        errorMessage,
+      }
+    })
   })
 
   const appVersion = computed(() => {
@@ -274,10 +359,14 @@ export const useConfigStore = defineStore('config', () => {
 
   async function fetchConfig () {
     const response = await api.getConfiguration()
-    state.value = {
+    setConfiguration({
       themes: {},
       ...response.data,
-    }
+    })
+  }
+
+  function setConfiguration (value) {
+    state.value = value
   }
 
   async function $reset () {
@@ -289,17 +378,17 @@ export const useConfigStore = defineStore('config', () => {
       if (!purpose) {
         return true
       }
-      return !!defaultHibernationSchedule.value[purpose]
+      return !!get(defaultHibernationSchedule.value, [purpose], false)
     }
     return false
   }
 
   function isShootHasNoHibernationScheduleWarning (shoot) {
-    const purpose = get(shoot, 'spec.purpose')
-    const annotations = get(shoot, 'metadata.annotations', {})
+    const purpose = get(shoot, ['spec', 'purpose'])
+    const annotations = get(shoot, ['metadata', 'annotations'], {})
     if (purposeRequiresHibernationSchedule(purpose)) {
       const hasNoScheduleFlag = !!annotations['dashboard.garden.sapcloud.io/no-hibernation-schedule']
-      if (!hasNoScheduleFlag && isEmpty(get(shoot, 'spec.hibernation.schedules'))) {
+      if (!hasNoScheduleFlag && isEmpty(get(shoot, ['spec', 'hibernation', 'schedules']))) {
         return true
       }
     }
@@ -307,7 +396,7 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   function conditionForType (type) {
-    return get(knownConditions.value, type, getCondition(type))
+    return get(allKnownConditions.value, [type], getCondition(type))
   }
 
   return {
@@ -334,19 +423,24 @@ export const useConfigStore = defineStore('config', () => {
     helpMenuItems,
     externalTools,
     defaultNodesCIDR,
+    shootAdminKubeconfig,
     apiServerUrl,
     clusterIdentity,
     seedCandidateDeterminationStrategy,
     serviceAccountDefaultTokenExpiration,
     isTerminalEnabled,
     isProjectTerminalShortcutsEnabled,
+    isShootForceDeletionEnabled,
+    isOidcObservabilityUrlsEnabled,
+    throttleDelayPerCluster,
     alertBannerMessage,
     alertBannerType,
     alertBannerIdentifier,
-    costObjectSettings,
+    costObjectsSettings,
     purposeRequiresHibernationSchedule,
     isShootHasNoHibernationScheduleWarning,
     fetchConfig,
+    setConfiguration,
     conditionForType,
     $reset,
   }

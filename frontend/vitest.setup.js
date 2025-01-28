@@ -16,7 +16,32 @@ const globalWindow = global.window
 const fetchMock = createFetchMock(vi)
 fetchMock.enableMocks()
 
-globalDocument.createRange = vi.fn().mockImplementation(() => {
+vi.mock('lodash/sample', () => {
+  const sample = vi.fn(collection => {
+    if (!Array.isArray(collection)) {
+      collection = Object.values(collection)
+    }
+    return collection[0]
+  })
+  return {
+    default: sample,
+  }
+})
+
+vi.mock('@/utils', async importOriginal => {
+  const originalUtils = await importOriginal()
+  const utils = {
+    ...originalUtils,
+    shortRandomString (length) {
+      return 'm6kgstc1b0dinxqj8z5wu7l9f3pveary2ho4'.substring(0, length)
+    },
+  }
+  return {
+    ...utils,
+  }
+})
+
+globalDocument.createRange = vi.fn(() => {
   const range = new Range()
   range.getBoundingClientRect = vi.fn()
   range.getClientRects = () => {
@@ -29,7 +54,7 @@ globalDocument.createRange = vi.fn().mockImplementation(() => {
   return range
 })
 
-globalWindow.matchMedia = vi.fn().mockImplementation(query => {
+globalWindow.matchMedia = vi.fn(query => {
   return {
     matches: false,
     media: query,
@@ -37,6 +62,11 @@ globalWindow.matchMedia = vi.fn().mockImplementation(query => {
     removeEventListener: vi.fn(),
   }
 })
+
+globalWindow.cookieStore = {
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+}
 
 vi.stubGlobal('console', {
   log (...args) {
@@ -55,3 +85,4 @@ const ResizeObserverMock = vi.fn(() => ({
 vi.stubGlobal('ResizeObserver', ResizeObserverMock)
 vi.stubGlobal('requestAnimationFrame', window.requestAnimationFrame)
 vi.stubGlobal('fixtures', fixtures)
+vi.stubGlobal('document', globalDocument)

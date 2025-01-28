@@ -8,6 +8,9 @@
 
 import md5 from 'md5'
 
+import get from 'lodash/get'
+import set from 'lodash/set'
+
 export { md5 }
 
 export function normalizeObject (obj) {
@@ -24,8 +27,8 @@ export function normalizeObject (obj) {
     obj = Object.fromEntries(obj)
   }
   return Object.keys(obj).sort().reduce((accumulator, key) => {
-    accumulator[key] = normalizeValue(obj[key])
-    return accumulator
+    const value = get(obj, [key])
+    return set(accumulator, [key], normalizeValue(value))
   }, {})
 }
 

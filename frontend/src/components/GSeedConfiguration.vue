@@ -7,74 +7,95 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-action-button-dialog
     ref="actionDialog"
-    :shoot-item="shootItem"
     width="450"
     caption="Configure Seed"
     confirm-required
     @dialog-opened="onConfigurationDialogOpened"
   >
-    <template #actionComponent>
-      <v-select
-        v-model="seedName"
-        hint="Change seed cluster for this shoot's control plane"
-        color="primary"
-        item-color="primary"
-        label="Seed Cluster"
-        :items="seedNames"
-        persistent-hint
-      />
+    <template #content>
+      <v-card-text>
+        <v-select
+          v-model="seedName"
+          hint="Change seed cluster for this shoot's control plane"
+          color="primary"
+          item-color="primary"
+          label="Seed Cluster"
+          :items="seedNames"
+          persistent-hint
+        />
+        <div
+          v-if="providerMismatch"
+          class="my-2"
+        >
+          Note: Ensure network connectivity for etcd backups and Shoot control plane. Without it, migration may stall.
+        </div>
+      </v-card-text>
     </template>
   </g-action-button-dialog>
 </template>
 
 <script>
 import {
-  mapState,
-  mapActions,
-} from 'pinia'
+  ref,
+  computed,
+} from 'vue'
 
 import { useSeedStore } from '@/store/seed'
 
 import GActionButtonDialog from '@/components/dialogs/GActionButtonDialog'
 
-import { errorDetailsFromError } from '@/utils/error'
-import shootItem from '@/mixins/shootItem'
+import { useShootItem } from '@/composables/useShootItem'
 
-import {
-  map,
-  filter,
-} from '@/lodash'
+import { errorDetailsFromError } from '@/utils/error'
+
+import map from 'lodash/map'
+import find from 'lodash/find'
 
 export default {
   components: {
     GActionButtonDialog,
   },
-  mixins: [
-    shootItem,
-  ],
   inject: ['api', 'logger'],
-  data () {
+  setup () {
+    const {
+      shootNamespace,
+      shootName,
+      shootSeedName,
+      shootProviderType,
+    } = useShootItem()
+
+    const seedStore = useSeedStore()
+
+    const seedNames = computed(() => {
+      return map(seedStore.seedList, 'metadata.name')
+    })
+
+    const providerMismatch = computed(() => {
+      const selectedSeed = find(seedStore.seedList, ['metadata.name', seedName.value])
+      const sourceSeed = find(seedStore.seedList, ['metadata.name', shootSeedName.value])
+      if (!selectedSeed || !sourceSeed) {
+        return false
+      }
+      const selectedProvider = selectedSeed.data.type
+      const sourceProvider = sourceSeed.data.type
+      const shootProvider = shootProviderType.value
+      return selectedProvider !== sourceProvider || selectedProvider !== shootProvider
+    })
+
+    const seedName = ref(shootSeedName.value)
+
     return {
-      seedName: undefined,
+      shootNamespace,
+      shootName,
+      shootSeedName,
+      seedName,
+      seedNames,
+      providerMismatch,
     }
   },
-  computed: {
-    ...mapState(useSeedStore, [
-      'seedList',
-    ]),
-    seedNames () {
-      const filteredSeeds = filter(this.seedList, ['data.type', this.shootCloudProviderKind])
-      return map(filteredSeeds, seed => {
-        return seed.metadata.name
-      })
-    },
-  },
   methods: {
-    ...mapActions(useSeedStore, [
-      'seedByName',
-    ]),
     async onConfigurationDialogOpened () {
-      await this.reset()
+      this.seedName = this.shootSeedName
       const confirmed = await this.$refs.actionDialog.waitForDialogClosed()
       if (confirmed) {
         await this.updateConfiguration()
@@ -96,9 +117,6 @@ export default {
         this.$refs.actionDialog.setError({ errorMessage, detailedErrorMessage })
         this.logger.error(errorMessage, errorDetails.errorCode, errorDetails.detailedMessage, err)
       }
-    },
-    async reset () {
-      this.seedName = this.shootSeedName
     },
   },
 }

@@ -7,22 +7,23 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    :vendor="vendor"
-    :create-title="`Add new ${vendor} Secret`"
-    :replace-title="`Replace ${vendor} Secret`"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
+    :provider-type="providerType"
+    :create-title="`Add new ${providerType} Secret`"
+    :replace-title="`Replace ${providerType} Secret`"
   >
     <template #secret-slot>
       <div>
         <v-textarea
-          ref="data"
           v-model="data"
           color="primary"
           variant="filled"
           label="Secret Data"
-          :error-messages="getErrorMessages('data')"
+          :error-messages="getErrorMessages(v$.data)"
+          :append-icon="hideSecret ? 'mdi-eye' : 'mdi-eye-off'"
+          :class="{ 'hide-secret': hideSecret }"
+          @click:append="() => (hideSecret = !hideSecret)"
           @update:model-value="onInputSecretData"
           @blur="v$.data.$touch()"
         />
@@ -34,7 +35,7 @@ SPDX-License-Identifier: Apache-2.0
           This is a generic secret dialog.
         </p>
         <p>
-          Please enter data required for {{ vendor }}.
+          Please enter data required for {{ providerType }}.
         </p>
       </div>
     </template>
@@ -44,37 +45,36 @@ SPDX-License-Identifier: Apache-2.0
 <script>
 import { useVuelidate } from '@vuelidate/core'
 import { required } from '@vuelidate/validators'
+import yaml from 'js-yaml'
 
 import GSecretDialog from '@/components/Secrets/GSecretDialog'
 
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
+
 import {
-  getValidationErrors,
+  withFieldName,
+  withMessage,
+} from '@/utils/validators'
+import {
+  getErrorMessages,
   setDelayedInputFocus,
 } from '@/utils'
 
-import { isObject } from '@/lodash'
-
-const validationErrors = {
-  data: {
-    required: 'You can\'t leave this empty.',
-    isYAML: 'You need to enter secret data as YAML key-value pairs',
-  },
-}
+import isObject from 'lodash/isObject'
 
 export default {
   components: {
     GSecretDialog,
   },
-  inject: ['yaml'],
   props: {
     modelValue: {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
-    vendor: {
+    providerType: {
       type: String,
     },
   },
@@ -82,20 +82,30 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const { secretData } = secretStringDataRefs({
+      secretData: 'secretData',
+    })
+
     return {
+      secretData,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
+      hideSecret: true,
       data: undefined,
-      secretData: {},
-      validationErrors,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      data: withFieldName('Secret Data', {
+        required,
+        isYAML: withMessage('You need to enter secret data as YAML key - value pairs', () => Object.keys(this.secretData).length > 0),
+      }),
+    }
   },
   computed: {
     visible: {
@@ -109,25 +119,16 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    validators () {
-      const validators = {
-        data: {
-          required,
-          isYAML: () => Object.keys(this.secretData).length > 0,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
   },
   methods: {
-    async onInputSecretData () {
+    onInputSecretData () {
       this.secretData = {}
 
       try {
-        this.secretData = await this.yaml.load(this.data)
+        this.secretData = yaml.load(this.data)
       } catch (err) {
         /* ignore errors */
       } finally {
@@ -148,9 +149,7 @@ export default {
         setDelayedInputFocus(this, 'data')
       }
     },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>
@@ -174,6 +173,12 @@ export default {
         font-weight: 300;
         font-size: 16px;
       }
+    }
+  }
+
+  .hide-secret {
+    :deep(.v-input__control textarea) {
+      -webkit-text-security: disc;
     }
   }
 

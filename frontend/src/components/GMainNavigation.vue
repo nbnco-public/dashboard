@@ -25,7 +25,8 @@ SPDX-License-Identifier: Apache-2.0
       <v-menu
         v-model="projectMenu"
         location="bottom"
-        :attach="true"
+        :attach="false"
+        :open-delay="100"
         open-on-click
         :close-on-content-click="false"
         :offset="[0]"
@@ -88,6 +89,7 @@ SPDX-License-Identifier: Apache-2.0
                 single-line
                 hide-details
                 class="project-filter"
+                spellcheck="false"
                 @keyup.esc="projectFilter = ''"
                 @keyup.enter="navigateToHighlightedProject"
                 @update:model-value="onInputProjectFilter"
@@ -256,27 +258,28 @@ import {
   routeName as getRouteName,
 } from '@/utils'
 
-import {
-  find,
-  findIndex,
-  filter,
-  sortBy,
-  toLower,
-  includes,
-  replace,
-  get,
-  has,
-  head,
-  slice,
-  last,
-} from '@/lodash'
+import find from 'lodash/find'
+import findIndex from 'lodash/findIndex'
+import filter from 'lodash/filter'
+import sortBy from 'lodash/sortBy'
+import toLower from 'lodash/toLower'
+import includes from 'lodash/includes'
+import replace from 'lodash/replace'
+import get from 'lodash/get'
+import has from 'lodash/has'
+import head from 'lodash/head'
+import slice from 'lodash/slice'
+import last from 'lodash/last'
+import isEmpty from 'lodash/isEmpty'
 
 const allProjectsItem = {
   metadata: {
     name: 'All Projects',
+  },
+  spec: {
     namespace: '_all',
   },
-  data: {
+  status: {
     phase: 'Ready',
   },
 }
@@ -307,13 +310,13 @@ const canCreateProject = toRef(authzStore, 'canCreateProject')
 
 const selectedProject = computed({
   get () {
-    if (namespace.value === allProjectsItem.metadata.namespace) {
+    if (namespace.value === allProjectsItem.spec.namespace) {
       return allProjectsItem
     }
-    return find(projectList.value, ['metadata.namespace', namespace.value])
+    return find(projectList.value, ['spec.namespace', namespace.value])
   },
-  set ({ metadata = {} } = {}) {
-    router.push(getProjectMenuTargetRoute(metadata.namespace))
+  set ({ spec = {} } = {}) {
+    router.push(getProjectMenuTargetRoute(spec.namespace))
   },
 })
 
@@ -322,7 +325,7 @@ const hasNoProjects = computed(() => {
 })
 
 const routes = computed(() => {
-  const hasProjectScope = get(selectedProject.value, 'metadata.namespace') !== allProjectsItem.metadata.namespace
+  const hasProjectScope = get(selectedProject.value, ['spec', 'namespace']) !== allProjectsItem.spec.namespace
   return getRoutes(router, hasProjectScope)
 })
 
@@ -342,42 +345,44 @@ const sortedAndFilteredProjectList = computed(() => {
     }
     const filter = toLower(projectFilter.value)
     const name = toLower(item.metadata.name)
-    const owner = toLower(replace(item.data.owner, /@.*$/, ''))
+    let owner = get(item, ['spec', 'owner', 'name'])
+    owner = toLower(replace(owner, /@.*$/, ''))
     return includes(name, filter) || includes(owner, filter)
   }
-  const filteredList = filter(projectList.value, predicate)
+  const filteredList = filter([
+    allProjectsItem,
+    ...projectList.value,
+  ], predicate)
 
   const exactMatch = item => {
-    return isProjectNameMatchingFilter(item.metadata.name) ? 0 : 1
+    return toLower(item.metadata.name) === toLower(projectFilter.value) ? 0 : 1
   }
-  const sortedList = sortBy(filteredList, [exactMatch, 'metadata.name'])
+  const allProjectsMatch = item => {
+    return item?.spec.namespace === allProjectsItem.spec.namespace ? 0 : 1
+  }
+  const sortedList = sortBy(filteredList, [allProjectsMatch, exactMatch, 'metadata.name'])
   return sortedList
 })
 
-const sortedAndFilteredProjectListWithAllProjects = computed(() => {
-  if (projectList.value.length > 1) {
-    return [
-      allProjectsItem,
-      ...sortedAndFilteredProjectList.value,
-    ]
-  }
-  return sortedAndFilteredProjectList.value
-})
-
 const visibleProjectList = computed(() => {
-  const projectList = sortedAndFilteredProjectListWithAllProjects.value
+  const projectList = sortedAndFilteredProjectList.value
   const endIndex = numberOfVisibleProjects.value
   return slice(projectList, 0, endIndex)
 })
 
-const projectFilterHasExactMatch = computed(() => {
+const projectNameThatMatchesFilter = computed(() => {
   const project = head(sortedAndFilteredProjectList.value)
-  const projectName = get(project, 'metadata.name')
-  return isProjectNameMatchingFilter(projectName)
+  const projectName = get(project, ['metadata', 'name'])
+
+  const singleMatch = sortedAndFilteredProjectList.value?.length === 1
+
+  return singleMatch
+    ? projectName
+    : undefined
 })
 
 function getProjectOwner (project) {
-  return emailToDisplayName(get(project, 'data.owner'))
+  return emailToDisplayName(get(project, ['spec', 'owner', 'name']))
 }
 
 function namespacedRoute (route) {
@@ -385,26 +390,24 @@ function namespacedRoute (route) {
 }
 
 function findProjectCaseInsensitive (projectName) {
-  return find(sortedAndFilteredProjectListWithAllProjects.value, project => {
+  return find(sortedAndFilteredProjectList.value, project => {
     return toLower(projectName) === toLower(project.metadata.name)
   })
 }
 
 function findProjectIndexCaseInsensitive (projectName) {
-  return findIndex(sortedAndFilteredProjectListWithAllProjects.value, project => {
+  return findIndex(sortedAndFilteredProjectList.value, project => {
     return toLower(projectName) === toLower(project.metadata.name)
   })
 }
 
-function highlightedProject () {
-  if (!highlightedProjectName.value) {
-    return head(sortedAndFilteredProjectListWithAllProjects.value)
-  }
-  return findProjectCaseInsensitive(highlightedProjectName.value)
-}
-
 function navigateToHighlightedProject () {
-  navigateToProject(highlightedProject())
+  if (!highlightedProjectName.value) {
+    return
+  }
+
+  const project = findProjectCaseInsensitive(highlightedProjectName.value)
+  navigateToProject(project)
 }
 
 function onProjectClick (event, project) {
@@ -429,13 +432,16 @@ function openProjectDialog () {
 
 function getProjectMenuTargetRoute (namespace) {
   const fallbackToShootList = route => {
-    if (namespace === '_all' && get(route, 'meta.projectScope') !== false) {
+    if (namespace === '_all' && get(route, ['meta', 'projectScope']) !== false) {
       return true
     }
-    if (has(route, 'params.name')) {
+    if (has(route, ['params', 'name'])) {
       return true
     }
-    if (get(route, 'name') === 'GardenTerminal') {
+    if (get(route, ['name']) === 'NewShoot' || get(route, ['name']) === 'NewShootEditor') {
+      return true
+    }
+    if (get(route, ['name']) === 'GardenTerminal') {
       return true
     }
     return false
@@ -449,7 +455,7 @@ function getProjectMenuTargetRoute (namespace) {
     }
   }
   const name = getRouteName(currentRoute)
-  const key = get(currentRoute, 'meta.namespaced') === false
+  const key = get(currentRoute, ['meta', 'namespaced']) === false
     ? 'query'
     : 'params'
   return {
@@ -463,46 +469,62 @@ function getProjectMenuTargetRoute (namespace) {
 function onInputProjectFilter () {
   highlightedProjectName.value = undefined
   numberOfVisibleProjects.value = initialVisibleProjects
-  if (projectFilterHasExactMatch.value) {
-    highlightedProjectName.value = projectFilter.value
+
+  if (!projectNameThatMatchesFilter.value) {
+    return
   }
 
-  nextTick(() => scrollHighlightedProjectIntoView())
+  highlightedProjectName.value = projectNameThatMatchesFilter.value
+  nextTick(() => scrollProjectIntoView(highlightedProjectName.value))
 }
 
 function highlightProjectWithKeys (keyDirection) {
-  let currentHighlightedIndex = 0
-  if (highlightedProjectName.value) {
-    currentHighlightedIndex = findProjectIndexCaseInsensitive(highlightedProjectName.value)
+  const projectName = highlightedProjectName.value ?? selectedProjectName.value
+
+  let currentHighlightedIndex = findProjectIndexCaseInsensitive(projectName)
+
+  if (currentHighlightedIndex < 0) {
+    // reset index, regardless of key direction
+    currentHighlightedIndex = 0
+  } else if (keyDirection === 'up' && currentHighlightedIndex > 0) {
+    currentHighlightedIndex--
+  } else if (keyDirection === 'down' && currentHighlightedIndex < sortedAndFilteredProjectList.value.length - 1) {
+    currentHighlightedIndex++
   }
 
-  if (keyDirection === 'up') {
-    if (currentHighlightedIndex > 0) {
-      currentHighlightedIndex--
-    }
-  } else if (keyDirection === 'down') {
-    if (currentHighlightedIndex < sortedAndFilteredProjectListWithAllProjects.value.length - 1) {
-      currentHighlightedIndex++
-    }
-  }
-
-  const newHighlightedProject = sortedAndFilteredProjectListWithAllProjects.value[currentHighlightedIndex]
+  const newHighlightedProject = sortedAndFilteredProjectList.value[currentHighlightedIndex] // eslint-disable-line security/detect-object-injection
   highlightedProjectName.value = newHighlightedProject.metadata.name
 
   if (currentHighlightedIndex >= numberOfVisibleProjects.value - 1) {
     numberOfVisibleProjects.value++
   }
 
-  scrollHighlightedProjectIntoView()
+  scrollProjectIntoView(highlightedProjectName.value)
 }
 
-function scrollHighlightedProjectIntoView () {
-  if (refProjectListItems.value) {
+function scrollProjectIntoView (projectName, allowRecursion = true) {
+  if (!refProjectListItems.value) {
     return
   }
+
   const projectListItem = refProjectListItems.value.find(child => {
-    return child.$attrs['data-g-project-name'] === highlightedProjectName.value
+    return child.$attrs['data-g-project-name'] === projectName
   })
+
+  if (allowRecursion && !projectListItem) {
+    const index = findProjectIndexCaseInsensitive(projectName)
+    const desiredCount = index + 1
+    if (desiredCount > numberOfVisibleProjects.value) {
+      numberOfVisibleProjects.value = desiredCount
+
+      nextTick(() => {
+        const allowRecursion = false // avoid recursive calls, preventing potential endless loop
+        scrollProjectIntoView(projectName, allowRecursion)
+      })
+    }
+    return
+  }
+
   if (!projectListItem) {
     return
   }
@@ -518,13 +540,13 @@ function scrollIntoView (element, ...args) {
 }
 
 function handleProjectListScroll () {
-  const projectListElement = refProjectList.value.$el
+  const projectListElement = refProjectList.value?.$el
   if (!projectListElement) {
     return
   }
   const projectListBottomPosY = projectListElement.getBoundingClientRect().top + projectListElement.getBoundingClientRect().height
   const projectListChildren = refProjectListItems.value
-  if (!projectListChildren) {
+  if (isEmpty(projectListChildren)) {
     return
   }
   const lastProjectElement = last(projectListChildren).$el
@@ -536,14 +558,10 @@ function handleProjectListScroll () {
   const scrolledToLastElement = lastProjectElementPosY > 0
   if (scrolledToLastElement) {
     // scrolled last element into view
-    if (numberOfVisibleProjects.value <= sortedAndFilteredProjectListWithAllProjects.value.length) {
+    if (numberOfVisibleProjects.value <= sortedAndFilteredProjectList.value.length) {
       numberOfVisibleProjects.value++
     }
   }
-}
-
-function isProjectNameMatchingFilter (projectName) {
-  return toLower(projectName) === toLower(projectFilter.value)
 }
 
 function isHighlightedProject (project) {
@@ -561,88 +579,91 @@ watch(projectMenu, value => {
     requestAnimationFrame(() => {
       setDelayedInputFocus(refProjectFilter)
     })
+    nextTick(() => scrollProjectIntoView(selectedProjectName.value))
+  } else {
+    // reset highlighted project name on close
+    highlightedProjectName.value = undefined
   }
 })
 
 </script>
 
 <style lang="scss" scoped>
-.v-navigation-drawer {
-  .project-selector {
-    height: 60px !important;
-    font-weight: 700;
-    font-size: 16px;
+.project-selector {
+  height: 60px !important;
+  font-weight: 700;
+  font-size: 16px;
 
-    :deep(.v-btn__prepend) {
-      margin: 0 24px 0 0 !important;
-    }
-    :deep(.v-btn__content > div) {
-      min-width: 153px !important;
-      text-align: left !important;
-    }
-    :deep(.v-btn__append) {
-      margin: 0 0 0 4px !important;
-    }
-
-    .placeholder::before {
-      content: 'Project';
-      font-weight: 400;
-      text-transform: none;
-    }
+  :deep(.v-btn__prepend) {
+    margin: 0 24px 0 0 !important;
+  }
+  :deep(.v-btn__content > div) {
+    min-width: 153px !important;
+    text-align: left !important;
+  }
+  :deep(.v-btn__append) {
+    margin: 0 0 0 4px !important;
   }
 
-  .project-menu {
-    border-radius: 0;
+  .placeholder::before {
+    content: 'Project';
+    font-weight: 400;
+    text-transform: none;
+  }
+}
 
-    .v-card {
-      border-radius: 0;
+.project-menu {
+  border-radius: 0 !important;
 
-      .project-filter {
-        font-weight: normal;
+  .v-card {
+    border-radius: 0 !important;
 
-        :deep(.v-field__input) {
-          padding-top: 16px;
-          padding-bottom: 12px;
-        }
-        :deep(.v-input__prepend > .v-icon) {
-          opacity: 0.9;
-        }
+    .project-filter {
+      font-weight: normal;
+
+      :deep(.v-field__input) {
+        padding-top: 16px;
+        padding-bottom: 12px;
       }
 
-      .project-add > div {
-        justify-content: left;
+      :deep(.v-input__prepend > .v-icon) {
+        opacity: 0.9;
+      }
+    }
+
+    .project-add>div {
+      justify-content: left;
+    }
+
+    .project-list {
+      height: auto;
+      max-height: (4 * 48px) + (2 * 8px);
+      overflow-y: auto;
+      max-width: 255px;
+
+      .project-name {
+        font-size: 14px;
       }
 
-      .project-list {
-        height: auto;
-        max-height: (4 * 48px) + (2 * 8px);
-        overflow-y: auto;
-        max-width: 255px;
+      .project-owner {
+        font-size: 11px;
+      }
 
-        .project-name {
-          font-size: 14px;
-        }
+      :deep(.v-list-item__prepend > .v-icon) {
+        opacity: 0.9;
+      }
 
-        .project-owner {
-          font-size: 11px;
-        }
-
-        :deep(.v-list-item__prepend > .v-icon) {
-          opacity: 0.9;
-        }
-
-        .highlighted-item {
-          background-color: rgba(#c0c0c0, .2) !important;
-          font-weight: bold;
-        }
+      .highlighted-item {
+        background-color: rgba(#c0c0c0, .2) !important;
+        font-weight: bold;
       }
     }
   }
+}
 
-  .main-menu {
-    .active-item {
-      background-color: rgba(#fff, .3);
-    }
+.main-menu {
+  .active-item {
+    background-color: rgba(#fff, .3);
   }
 }
 </style>

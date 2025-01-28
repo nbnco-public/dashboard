@@ -24,7 +24,7 @@ SPDX-License-Identifier: Apache-2.0
             v-bind="props"
             size="small"
             color="warning"
-            variant="outlined"
+            variant="tonal"
             class="my-0 ml-2"
           >
             Unverified
@@ -83,11 +83,13 @@ SPDX-License-Identifier: Apache-2.0
 
 <script>
 import { mapState } from 'pinia'
+import yaml from 'js-yaml'
 
 import { useAuthnStore } from '@/store/authn'
 import { useAuthzStore } from '@/store/authz'
 
-import { shootItem } from '@/mixins/shootItem'
+import { useShootItem } from '@/composables/useShootItem'
+
 import {
   TargetEnum,
   targetText,
@@ -96,18 +98,15 @@ import {
 import GCodeBlock from './GCodeBlock.vue'
 import GActionButton from './GActionButton.vue'
 
-import {
-  get,
-  join,
-} from '@/lodash'
+import join from 'lodash/join'
+import get from 'lodash/get'
 
 export default {
   components: {
     GActionButton,
     GCodeBlock,
   },
-  mixins: [shootItem],
-  inject: ['yaml', 'logger'],
+  inject: ['logger'],
   props: {
     shortcut: {
       type: Object,
@@ -128,6 +127,17 @@ export default {
   emits: [
     'addTerminalShortcut',
   ],
+  setup () {
+    const {
+      shootItem,
+      isShootStatusHibernated,
+    } = useShootItem()
+
+    return {
+      shootItem,
+      isShootStatusHibernated,
+    }
+  },
   data () {
     return {
       expansionPanel: false,
@@ -145,14 +155,14 @@ export default {
       'hasShootTerminalAccess',
     ]),
     image () {
-      return get(this.shortcut, 'container.image', 'default')
+      return get(this.shortcut, ['container', 'image'], 'default')
     },
     command () {
-      const command = get(this.shortcut, 'container.command')
+      const command = get(this.shortcut, ['container', 'command'])
       return join(command, ' ')
     },
     args () {
-      const args = get(this.shortcut, 'container.args')
+      const args = get(this.shortcut, ['container', 'args'])
       return join(args, ' ')
     },
     disabled () {
@@ -177,7 +187,7 @@ export default {
     },
   },
   watch: {
-    async shortcut (value) {
+    shortcut (value) {
       this.updateShortcutYaml(this.shortcut)
     },
   },
@@ -191,9 +201,9 @@ export default {
     shortcutTargetDescription (shortcut) {
       return targetText(shortcut.target)
     },
-    async updateShortcutYaml (value) {
+    updateShortcutYaml (value) {
       try {
-        this.shortcutYaml = await this.yaml.dump(value)
+        this.shortcutYaml = yaml.dump(value)
       } catch (err) {
         this.logger.error(err)
       }

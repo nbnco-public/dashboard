@@ -1,0 +1,92 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    ':semanticCommitsDisabled',
+    'customManagers:githubActionsVersions',
+    'group:monorepos',
+  ],
+  labels: [
+    'kind/enhancement',
+    'renovate',
+  ],
+  ignorePaths: [
+    '**/node_modules/**',
+    '**/.yarn/**',
+  ],
+  postUpdateOptions: [
+    'yarnDedupeHighest',
+  ],
+  customManagers: [
+    {
+      customType: 'regex',
+      fileMatch: [
+        '^.ci/pipeline_definitions$',
+      ],
+      matchStrings: [
+        'image: [\'"]?(?<depName>.*?):(?<currentValue>.*?)[\'"]?\\s',
+      ],
+      datasourceTemplate: 'docker',
+    },
+  ],
+  packageRules: [
+    {
+      matchDepTypes: [
+        'devDependencies',
+      ],
+      groupName: 'Monthly Dev Dependencies',
+      schedule: [
+        'on the first day of the month',
+      ],
+    },
+    {
+      matchUpdateTypes: [
+        'patch',
+      ],
+      automerge: true,
+    },
+    {
+      matchDatasources: [
+        'npm',
+      ],
+      matchPackageNames: [
+        '@octokit/auth-app',
+        '@octokit/core',
+        '@octokit/plugin-paginate-graphql',
+        '@octokit/plugin-paginate-rest',
+        '@octokit/plugin-request-log',
+        '@octokit/plugin-rest-endpoint-methods',
+        'chalk',
+        'jest',
+        'openid-client',
+        'p-event',
+        'p-limit',
+        'p-retry',
+        'p-timeout',
+      ],
+      matchUpdateTypes: [
+        'major',
+      ],
+      enabled: false,
+    },
+    {
+      matchDatasources: [
+        'npm',
+      ],
+      matchPackageNames: [
+        'sass',
+      ],
+      matchUpdateTypes: [
+        'major',
+        'minor',
+      ],
+      enabled: false,
+    },
+    {
+      groupName: 'github-actions',
+      matchManagers: [
+        'github-actions',
+      ],
+    },
+  ],
+}

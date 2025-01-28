@@ -7,21 +7,18 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    vendor="hcloud"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
     create-title="Add new Hetzner Cloud Secret"
     replace-title="Replace Hetzner Cloud Secret"
   >
     <template #secret-slot>
       <div>
         <v-text-field
-          ref="hcloudToken"
           v-model="hcloudToken"
           color="primary"
           label="Hetzner Cloud Token"
-          :error-messages="getErrorMessages('hcloudToken')"
+          :error-messages="getErrorMessages(v$.hcloudToken)"
           variant="underlined"
           @update:model-value="v$.hcloudToken.$touch()"
           @blur="v$.hcloudToken.$touch()"
@@ -55,16 +52,10 @@ import { required } from '@vuelidate/validators'
 import GSecretDialog from '@/components/Secrets/GSecretDialog'
 import GExternalLink from '@/components/GExternalLink.vue'
 
-import {
-  getValidationErrors,
-  setDelayedInputFocus,
-} from '@/utils'
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
 
-const validationErrors = {
-  hcloudToken: {
-    required: 'You can\'t leave this empty.',
-  },
-}
+import { withFieldName } from '@/utils/validators'
+import { getErrorMessages } from '@/utils'
 
 export default {
   components: {
@@ -76,7 +67,7 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
   },
@@ -84,20 +75,28 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const { hcloudToken } = secretStringDataRefs({
+      hcloudToken: 'hcloudToken',
+    })
+
     return {
+      hcloudToken,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      hcloudToken: undefined,
       hideHcloudToken: true,
-      validationErrors,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      hcloudToken: withFieldName('Cloud Token', {
+        required,
+      }),
+    }
   },
   computed: {
     visible: {
@@ -111,46 +110,12 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    secretData () {
-      return {
-        hcloudToken: this.hcloudToken,
-      }
-    },
-    validators () {
-      const validators = {
-        hcloudToken: {
-          required,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
   },
-  watch: {
-    value: function (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
   methods: {
-    reset () {
-      this.v$.$reset()
-
-      this.hcloudToken = ''
-
-      if (!this.isCreateMode) {
-        if (this.secret.data) {
-          this.hcloudToken = this.secret.data.hcloudToken
-        }
-        setDelayedInputFocus(this, 'hcloudToken')
-      }
-    },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>

@@ -17,82 +17,47 @@ SPDX-License-Identifier: Apache-2.0
         title="Create Project"
       />
       <v-card-text class="dialog-content">
-        <form>
-          <v-container fluid>
-            <v-row>
-              <v-col cols="12">
-                <v-text-field
-                  ref="projectName"
-                  v-model.trim="projectName"
-                  variant="underlined"
-                  color="primary"
-                  label="Name"
-                  counter="10"
-                  :error-messages="getFieldValidationErrors('projectName')"
-                  @update:model-value="v$.projectName.$touch()"
-                  @blur="v$.projectName.$touch()"
-                />
-              </v-col>
-            </v-row>
-
-            <v-row v-if="costObjectSettingEnabled">
-              <v-col cols="12">
-                <v-text-field
-                  ref="costObject"
-                  v-model="costObject"
-                  variant="underlined"
-                  color="primary"
-                  :label="costObjectTitle"
-                  :error-messages="getFieldValidationErrors('costObject')"
-                  @update:model-value="v$.costObject.$touch()"
-                  @blur="v$.costObject.$touch()"
-                />
-                <v-alert
-                  v-if="!!costObjectDescriptionHtml"
-                  density="compact"
-                  type="info"
-                  variant="outlined"
-                  color="primary"
-                >
-                  <!-- eslint-disable vue/no-v-html -->
-                  <div
-                    class="alert-banner-message"
-                    v-html="costObjectDescriptionHtml"
-                  />
-                  <!-- eslint-enable vue/no-v-html -->
-                </v-alert>
-              </v-col>
-            </v-row>
-
-            <v-row>
-              <v-col cols="12">
-                <v-text-field
-                  ref="description"
-                  v-model="description"
-                  variant="underlined"
-                  color="primary"
-                  label="Description"
-                />
-              </v-col>
-            </v-row>
-            <v-row>
-              <v-col cols="12">
-                <v-text-field
-                  ref="purpose"
-                  v-model="purpose"
-                  variant="underlined"
-                  color="primary"
-                  label="Purpose"
-                />
-              </v-col>
-            </v-row>
-            <g-message
-              v-model:message="errorMessage"
-              v-model:detailed-message="detailedErrorMessage"
-              color="error"
+        <v-row>
+          <v-col cols="12">
+            <v-text-field
+              ref="refProjectName"
+              v-model.trim="v$.projectName.$model"
+              variant="underlined"
+              color="primary"
+              label="Name"
+              counter="10"
+              :error-messages="getErrorMessages(v$.projectName)"
             />
-          </v-container>
-        </form>
+          </v-col>
+        </v-row>
+
+        <g-project-cost-object />
+
+        <v-row>
+          <v-col cols="12">
+            <v-text-field
+              v-model="description"
+              variant="underlined"
+              color="primary"
+              label="Description"
+            />
+          </v-col>
+        </v-row>
+        <v-row>
+          <v-col cols="12">
+            <v-text-field
+              v-model="purpose"
+              variant="underlined"
+              color="primary"
+              label="Purpose"
+            />
+          </v-col>
+        </v-row>
+        <g-message
+          v-model:message="errorMessage"
+          v-model:detailed-message="detailedErrorMessage"
+          color="error"
+        />
         <v-snackbar
           :model-value="loading"
           location="bottom right"
@@ -108,7 +73,7 @@ SPDX-License-Identifier: Apache-2.0
         <v-btn
           variant="text"
           :disabled="loading"
-          @click.stop="cancel"
+          @click="hide"
         >
           Cancel
         </v-btn>
@@ -116,8 +81,8 @@ SPDX-License-Identifier: Apache-2.0
           color="primary"
           variant="text"
           :loading="loading"
-          :disabled="!valid || loading"
-          @click.stop="submit"
+          :disabled="loading"
+          @click="submit"
         >
           Create
         </v-btn>
@@ -126,38 +91,40 @@ SPDX-License-Identifier: Apache-2.0
   </v-dialog>
 </template>
 
-<script>
+<script setup>
 import {
-  mapState,
-  mapActions,
-} from 'pinia'
+  ref,
+  computed,
+  watch,
+  toRef,
+} from 'vue'
 import { useVuelidate } from '@vuelidate/core'
 import {
   maxLength,
   required,
 } from '@vuelidate/validators'
+import { useRouter } from 'vue-router'
 
-import { useAuthnStore } from '@/store/authn'
-import { useConfigStore } from '@/store/config'
-import { useMemberStore } from '@/store/member'
 import { useProjectStore } from '@/store/project'
 
 import GMessage from '@/components/GMessage.vue'
 import GToolbar from '@/components/GToolbar.vue'
+import GProjectCostObject from '@/components/GProjectCostObject.vue'
+
+import { useLogger } from '@/composables/useLogger'
+import { useProvideProjectContext } from '@/composables/useProjectContext'
 
 import {
-  resourceName,
-  unique,
+  messageFromErrors,
+  lowerCaseAlphaNumHyphen,
   noStartEndHyphen,
   noConsecutiveHyphen,
+  withMessage,
 } from '@/utils/validators'
 import {
-  getValidationErrors,
+  getErrorMessages,
   setInputFocus,
   setDelayedInputFocus,
-  isServiceAccountUsername,
-  transformHtml,
-  getProjectDetails,
 } from '@/utils'
 import {
   errorDetailsFromError,
@@ -165,246 +132,122 @@ import {
   isGatewayTimeout,
 } from '@/utils/error'
 
-import {
-  get,
-  map,
-  set,
-  includes,
-  filter,
-  isEmpty,
-} from '@/lodash'
+const props = defineProps({
+  modelValue: {
+    type: Boolean,
+    required: true,
+  },
+})
 
-const defaultProjectName = ''
+const emit = defineEmits([
+  'update:modelValue',
+])
 
-export default {
-  components: {
-    GMessage,
-    GToolbar,
+const logger = useLogger()
+const projectStore = useProjectStore()
+const router = useRouter()
+const {
+  createProjectManifest,
+  projectManifest,
+  projectName,
+  description,
+  purpose,
+} = useProvideProjectContext()
+
+const projectNames = toRef(projectStore, 'projectNames')
+
+const visible = computed({
+  get () {
+    return props.modelValue
   },
-  inject: ['logger'],
-  props: {
-    modelValue: {
-      type: Boolean,
-      required: true,
-    },
-    project: {
-      type: Object,
-    },
+  set (value) {
+    return emit('update:modelValue', value)
   },
-  emits: [
-    'update:modelValue',
-    'cancel',
-  ],
-  setup () {
-    return {
-      v$: useVuelidate(),
-    }
+})
+
+const errorMessage = ref('')
+const detailedErrorMessage = ref('')
+const loading = ref(false)
+
+const refProjectName = ref(null)
+
+const isUniqueProjectName = withMessage(
+  'A project with this name already exists',
+  value => !value ? true : !projectNames.value.includes(value),
+)
+
+const rules = {
+  projectName: {
+    required,
+    maxLength: maxLength(10),
+    noConsecutiveHyphen,
+    noStartEndHyphen,
+    lowerCaseAlphaNumHyphen,
+    isUniqueProjectName,
   },
-  data () {
-    return {
-      projectName: undefined,
-      description: undefined,
-      purpose: undefined,
-      owner: undefined,
-      costObject: undefined,
-      errorMessage: undefined,
-      detailedErrorMessage: undefined,
-      loading: false,
-    }
-  },
-  validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
-  },
-  computed: {
-    ...mapState(useMemberStore, ['memberList']),
-    ...mapState(useAuthnStore, ['username']),
-    ...mapState(useProjectStore, ['projectNames']),
-    ...mapState(useConfigStore, ['costObjectSettings']),
-    visible: {
-      get () {
-        return this.modelValue
+}
+
+const v$ = useVuelidate(rules, { projectName })
+
+watch(visible, value => {
+  if (value) {
+    reset()
+  }
+})
+
+function hide () {
+  visible.value = false
+}
+
+async function submit () {
+  if (v$.value.$invalid) {
+    await v$.value.$validate()
+    const message = messageFromErrors(v$.value.$errors)
+    errorMessage.value = 'There are input errors that you need to resolve'
+    detailedErrorMessage.value = message
+    return
+  }
+
+  try {
+    loading.value = true
+    const project = await projectStore.createProject(projectManifest.value)
+    loading.value = false
+    hide()
+    router.push({
+      name: 'Secrets',
+      params: {
+        namespace: project.spec.namespace,
       },
-      set (value) {
-        this.$emit('update:modelValue', value)
-      },
-    },
-    projectDetails () {
-      return getProjectDetails(this.project)
-    },
-    costObjectSettingEnabled () {
-      return !isEmpty(this.costObjectSettings)
-    },
-    costObjectTitle () {
-      return get(this.costObjectSettings, 'title')
-    },
-    costObjectDescriptionHtml () {
-      const description = get(this.costObjectSettings, 'description')
-      return transformHtml(description)
-    },
-    costObjectRegex () {
-      return get(this.costObjectSettings, 'regex')
-    },
-    costObjectErrorMessage () {
-      return get(this.costObjectSettings, 'errorMessage')
-    },
-    currentProjectName () {
-      return this.projectDetails.projectName
-    },
-    currentDescription () {
-      return this.projectDetails.description
-    },
-    currentPurpose () {
-      return this.projectDetails.purpose
-    },
-    currentOwner () {
-      return this.projectDetails.owner
-    },
-    currentCostObject () {
-      return this.projectDetails.costObject
-    },
-    memberItems () {
-      const members = filter(map(this.memberList, 'username'), username => !isServiceAccountUsername(username))
-      const owner = this.currentOwner
-      if (owner && !includes(members, owner)) {
-        members.push(owner)
-      }
+    })
+  } catch (err) {
+    loading.value = false
+    if (isConflict(err)) {
+      errorMessage.value = `Project name '${projectName.value}' is already taken. Please try a different name.`
+      setInputFocus(refProjectName)
+    } else if (isGatewayTimeout(err)) {
+      errorMessage.value = 'Project has been created but initialization is still pending.'
+    } else {
+      errorMessage.value = 'Failed to create project.'
+    }
+    const { errorCode, detailedMessage } = errorDetailsFromError(err)
+    detailedErrorMessage.value = detailedMessage
+    logger.error(errorMessage.value, errorCode, detailedMessage, err)
+  }
+}
 
-      return members
-    },
-    valid () {
-      return !this.v$.$invalid
-    },
-    validators () {
-      const validators = {
-        owner: {
-          required,
-        },
-        costObject: {
-          validCostObject: value => {
-            if (!this.costObjectRegex) {
-              return true
-            }
-            return RegExp(this.costObjectRegex).test(value || '') // undefined cannot be evaluated, use empty string as default
-          },
-        },
-      }
-      validators.projectName = {
-        required,
-        maxLength: maxLength(10),
-        noConsecutiveHyphen,
-        noStartEndHyphen, // Order is important for UI hints
-        resourceName,
-        unique: unique('projectNames'),
-      }
-      return validators
-    },
-    validationErrors () {
-      return {
-        projectName: {
-          required: 'Name is required',
-          maxLength: 'Name exceeds the maximum length',
-          resourceName: 'Name must only be lowercase letters, numbers, and hyphens',
-          unique: 'Name is already in use',
-          noConsecutiveHyphen: 'Name must not contain consecutive hyphens',
-          noStartEndHyphen: 'Name must not start or end with a hyphen',
-        },
-        owner: {
-          required: 'Owner is required',
-        },
-        costObject: {
-          validCostObject: this.costObjectErrorMessage,
-        },
-      }
-    },
-  },
+function reset () {
+  v$.value.$reset()
+  errorMessage.value = undefined
+  detailedErrorMessage.value = undefined
 
-  watch: {
-    modelValue (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
-  methods: {
-    ...mapActions(useProjectStore, [
-      'createProject',
-      'updateProject',
-    ]),
-    getFieldValidationErrors (field) {
-      return getValidationErrors(this, field)
-    },
-    hide () {
-      this.visible = false
-    },
-    async submit () {
-      this.v$.$touch()
-      if (this.valid) {
-        try {
-          this.loading = true
-          const project = await this.save()
-          this.loading = false
-          this.hide()
-          this.$router.push({
-            name: 'Secrets',
-            params: {
-              namespace: project.metadata.namespace,
-            },
-          })
-        } catch (err) {
-          this.loading = false
-          if (isConflict(err)) {
-            this.errorMessage = `Project name '${this.projectName}' is already taken. Please try a different name.`
-            setInputFocus(this, 'projectName')
-          } else if (isGatewayTimeout(err)) {
-            this.errorMessage = 'Project has been created but initialization is still pending.'
-          } else {
-            this.errorMessage = 'Failed to create project.'
-          }
+  createProjectManifest()
 
-          const { errorCode, detailedMessage } = errorDetailsFromError(err)
-          this.detailedErrorMessage = detailedMessage
-          this.logger.error(this.errorMessage, errorCode, detailedMessage, err)
-        }
-      }
-    },
-    cancel () {
-      this.hide()
-      this.$emit('cancel')
-    },
-    save () {
-      const name = this.projectName
-      const metadata = { name }
-      if (this.costObjectSettingEnabled) {
-        set(metadata, ['annotations', 'billing.gardener.cloud/costObject'], this.costObject)
-      }
-
-      const description = this.description
-      const purpose = this.purpose
-      const data = { description, purpose }
-
-      return this.createProject({ metadata, data })
-    },
-    reset () {
-      this.v$.$reset()
-      this.errorMessage = undefined
-      this.detailedMessage = undefined
-
-      this.projectName = defaultProjectName
-      this.description = undefined
-      this.purpose = undefined
-      this.owner = this.username
-      this.costObject = undefined
-
-      setDelayedInputFocus(this, 'projectName')
-    },
-  },
-
+  setDelayedInputFocus(refProjectName)
 }
 </script>
 
 <style lang="scss" scoped>
-  .dialog-content {
-    height: auto;
-  }
+.dialog-content {
+  height: auto;
+}
 </style>

@@ -11,6 +11,7 @@ import {
 import {
   computed,
   toRef,
+  effectScope,
 } from 'vue'
 import { useRoute } from 'vue-router'
 import { useLocalStorage } from '@vueuse/core'
@@ -23,6 +24,29 @@ import { StorageSerializers } from '@/utils/storageSerializers'
 import { routeName as getRouteName } from '@/utils'
 
 const kLocalStorageKey = Symbol('kLocalStorageKey')
+const kLocalStorageScope = Symbol('kLocalStorageScope')
+
+function createLocalStorageRef (key, initialValue) {
+  let localStorageRef
+  const scope = effectScope()
+  scope.run(() => {
+    localStorageRef = useLocalStorage(key, initialValue, {
+      serializer: StorageSerializers.json,
+      writeDefaults: false,
+    })
+  })
+  Object.defineProperties(localStorageRef, {
+    [kLocalStorageScope]: {
+      value: scope,
+      enumerable: true,
+    },
+    [kLocalStorageKey]: {
+      value: key,
+      enumerable: true,
+    },
+  })
+  return localStorageRef
+}
 
 const useLazyLocalStorage = () => {
   const route = useRoute()
@@ -54,18 +78,15 @@ const useLazyLocalStorage = () => {
 
   const createGetter = (name, initialValue = null) => {
     return () => {
+      /* eslint-disable security/detect-object-injection */
       const currentKey = refs[name]?.[kLocalStorageKey]
       const key = keys[name]
       if (currentKey !== key) {
-        refs[name] = useLocalStorage(key, initialValue, {
-          serializer: StorageSerializers.json,
-          writeDefaults: false,
-        })
-        Object.defineProperty(refs[name], kLocalStorageKey, {
-          value: key,
-        })
+        refs[name]?.[kLocalStorageScope].stop()
+        refs[name] = createLocalStorageRef(key, initialValue)
       }
       return refs[name]
+      /* eslint-enable security/detect-object-injection */
     }
   }
 
@@ -84,7 +105,6 @@ const useLazyLocalStorage = () => {
 
 export const useLocalStorageStore = defineStore('localStorage', () => {
   const logger = useLogger()
-
   const logLevel = toRef(logger, 'logLevel')
 
   const initialColorScheme = 'auto'
@@ -107,6 +127,21 @@ export const useLocalStorageStore = defineStore('localStorage', () => {
 
   const hiddenMessages = useLocalStorage('global/alert-banner/hidden-messages', {}, {
     serializer: StorageSerializers.json,
+    writeDefaults: false,
+  })
+
+  const editorShortcuts = useLocalStorage('global/editor/shortcuts', {}, {
+    serializer: StorageSerializers.json,
+    writeDefaults: false,
+  })
+
+  const renderEditorWhitespaes = useLocalStorage('global/editor/render-whitespaces', false, {
+    serializer: StorageSerializers.flag,
+    writeDefaults: false,
+  })
+
+  const shootAdminKubeconfigExpiration = useLocalStorage('global/shoot-admin-kubeconfig-expiration', 0, {
+    serializer: StorageSerializers.integer,
     writeDefaults: false,
   })
 
@@ -187,11 +222,6 @@ export const useLocalStorageStore = defineStore('localStorage', () => {
     writeDefaults: false,
   })
 
-  const shootItemsPerPage = useLocalStorage('projects/shoot-list/itemsPerPage', 10, {
-    serializer: StorageSerializers.integer,
-    writeDefaults: false,
-  })
-
   const shootSortBy = useLocalStorage('projects/shoot-list/sortBy', [], {
     serializer: StorageSerializers.json,
     writeDefaults: false,
@@ -199,6 +229,11 @@ export const useLocalStorageStore = defineStore('localStorage', () => {
 
   const allProjectsShootFilter = useLocalStorage('project/_all/shoot-list/filter', {}, {
     serializer: StorageSerializers.json,
+    writeDefaults: false,
+  })
+
+  const shootListFetchFromCache = useLocalStorage('projects/shoot-list/fetch-from-cache', false, {
+    serializer: StorageSerializers.flag,
     writeDefaults: false,
   })
 
@@ -237,6 +272,9 @@ export const useLocalStorageStore = defineStore('localStorage', () => {
     operatorFeatures,
     logLevel,
     hiddenMessages,
+    editorShortcuts,
+    renderEditorWhitespaes,
+    shootAdminKubeconfigExpiration,
     userSelectedColumns,
     userItemsPerPage,
     userSortBy,
@@ -250,9 +288,9 @@ export const useLocalStorageStore = defineStore('localStorage', () => {
     dnsSecretItemsPerPage,
     dnsSecretSortBy,
     shootSelectedColumns,
-    shootItemsPerPage,
     shootSortBy,
     allProjectsShootFilter,
+    shootListFetchFromCache,
     shootCustomSortBy,
     shootCustomSelectedColumns,
     terminalSplitpaneTree,

@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: 2023 SAP SE or an SAP affiliate company and Gardener contributors
+SPDX-FileCopyrightText: 2024 SAP SE or an SAP affiliate company and Gardener contributors
 
 SPDX-License-Identifier: Apache-2.0
 -->
@@ -19,7 +19,7 @@ SPDX-License-Identifier: Apache-2.0
             <g-vendor
               title
               extended
-              :cloud-provider-kind="shootCloudProviderKind"
+              :provider-type="shootProviderType"
               :region="shootRegion"
               :zones="shootZones"
             />
@@ -27,7 +27,7 @@ SPDX-License-Identifier: Apache-2.0
           <div class="pt-1 d-flex flex-shrink-1">
             <g-vendor
               extended
-              :cloud-provider-kind="shootCloudProviderKind"
+              :provider-type="shootProviderType"
               :region="shootRegion"
               :zones="shootZones"
             />
@@ -36,20 +36,17 @@ SPDX-License-Identifier: Apache-2.0
       </g-list-item>
       <g-list-item v-if="hasShootWorkerGroups">
         <g-list-item-content label="Credential">
-          <router-link
-            v-if="canLinkToSecret"
-            class="text-anchor"
-            :to="{ name: 'Secret', params: { name: shootSecretBindingName, namespace: shootNamespace } }"
-          >
-            <span class="text-subtitle-1">{{ shootSecretBindingName }}</span>
-          </router-link>
-          <span v-else>{{ shootSecretBindingName }}</span>
+          <g-shoot-secret-name
+            :namespace="shootNamespace"
+            :secret-binding-name="shootSecretBindingName"
+          />
         </g-list-item-content>
       </g-list-item>
-      <g-list-item v-if="secret">
+      <g-list-item v-if="secretBinding?._secret">
         <g-secret-details-item-content
           infra
-          :secret="secret"
+          :secret="secretBinding._secret"
+          :provider-type="secretBinding.provider.type"
           details-title
         />
       </g-list-item>
@@ -62,13 +59,12 @@ SPDX-License-Identifier: Apache-2.0
             </v-icon>
           </template>
           <g-list-item-content label="Seed">
-            <g-shoot-seed-name :shoot-item="shootItem" />
+            <g-shoot-seed-name />
           </g-list-item-content>
           <template #append>
             <g-copy-btn :clipboard-text="shootSeedName" />
             <g-seed-configuration
               v-if="canPatchShootsBinding"
-              :shoot-item="shootItem"
             />
           </template>
         </g-list-item>
@@ -97,7 +93,6 @@ SPDX-License-Identifier: Apache-2.0
           >
             <span class="mr-1">Failure tolerance type</span>
             <g-control-plane-high-availability-tag
-              :shoot-item="shootItem"
               size="x-small"
             />
           </div>
@@ -106,7 +101,7 @@ SPDX-License-Identifier: Apache-2.0
           </template>
         </g-list-item-content>
         <template #append>
-          <g-control-plane-high-availability-configuration :shoot-item="shootItem" />
+          <g-control-plane-high-availability-configuration />
         </template>
       </g-list-item>
       <v-divider inset />
@@ -154,36 +149,47 @@ SPDX-License-Identifier: Apache-2.0
               label
               size="x-small"
               color="primary"
-              variant="outlined"
+              variant="tonal"
               class="ml-2"
             >
               {{ customDomainChipText }}
             </v-chip>
           </template>
-          {{ shootDomain }}
+          <div class="d-flex">
+            {{ shootDomain }}
+            <g-dns-provider
+              v-if="shootDnsPrimaryProvider"
+              class="ml-2"
+              primary
+              :secret-name="shootDnsPrimaryProvider.secretName"
+              :shoot-namespace="shootNamespace"
+              :type="shootDnsPrimaryProvider.type"
+            />
+          </div>
         </g-list-item-content>
       </g-list-item>
-      <g-list-item>
+      <g-list-item v-if="hasDnsServiceExtension || isCustomShootDomain">
         <template #prepend />
         <g-list-item-content label="DNS Providers">
-          <template v-if="shootDnsProviders && shootDnsProviders.length">
+          <div
+            v-if="shootDnsServiceExtensionProviders && shootDnsServiceExtensionProviders.length"
+            class="d-flex"
+          >
             <g-dns-provider
-              v-for="({ primary, secretName, type, domains, zones }) in shootDnsProviders"
+              v-for="({ secretName, type, domains, zones }) in shootDnsServiceExtensionProviders"
               :key="secretName"
               class="mr-2"
-              :primary="primary"
-              :secret-name="secretName"
+              :secret-name="getResourceRefName(secretName)"
               :shoot-namespace="shootNamespace"
               :type="type"
               :domains="domains"
               :zones="zones"
-              :secret="getCloudProviderSecretByName({ name: secretName, namespace: shootNamespace })"
             />
-          </template>
+          </div>
           <span v-else>No DNS provider configured</span>
         </g-list-item-content>
         <template #append>
-          <g-dns-configuration :shoot-item="shootItem" />
+          <g-dns-configuration />
         </template>
       </g-list-item>
       <template v-if="!!shootIngressDomainText">
@@ -209,31 +215,29 @@ SPDX-License-Identifier: Apache-2.0
           </template>
           <g-list-item-content label="Available Load Balancer Classes">
             <div class="d-flex align-center pt-1">
-              <v-tooltip
+              <v-chip
                 v-for="{ name } in shootLoadbalancerClasses"
                 :key="name"
-                :disabled="name !== defaultLoadbalancerClass"
-                location="top"
+                size="small"
+                class="mr-2"
+                variant="tonal"
+                color="primary"
               >
-                <template #activator="{ props }">
-                  <v-chip
-                    v-bind="props"
-                    size="small"
-                    class="mr-2"
-                    variant="outlined"
-                    color="primary"
-                  >
-                    {{ name }}
-                    <v-icon
-                      v-if="name === defaultLoadbalancerClass"
-                      size="small"
-                    >
-                      mdi-star
-                    </v-icon>
-                  </v-chip>
-                </template>
-                <span>Default Load Balancer Class</span>
-              </v-tooltip>
+                {{ name }}
+                <v-icon
+                  v-if="name === defaultLoadbalancerClass"
+                  size="small"
+                >
+                  mdi-star
+                </v-icon>
+                <v-tooltip
+                  activator="parent"
+                  :disabled="name !== defaultLoadbalancerClass"
+                  location="top"
+                >
+                  <span>Default Load Balancer Class</span>
+                </v-tooltip>
+              </v-chip>
             </div>
           </g-list-item-content>
         </g-list-item>
@@ -249,11 +253,13 @@ import {
 } from 'pinia'
 
 import { useCloudProfileStore } from '@/store/cloudProfile'
-import { useSecretStore } from '@/store/secret'
+import { useCredentialStore } from '@/store/credential'
 import { useAuthzStore } from '@/store/authz'
+import { useGardenerExtensionStore } from '@/store/gardenerExtension'
 
 import GCopyBtn from '@/components/GCopyBtn'
 import GShootSeedName from '@/components/GShootSeedName'
+import GShootSecretName from '@/components/GShootSecretName'
 import GVendor from '@/components/GVendor'
 import GDnsProvider from '@/components/ShootDns/GDnsProvider'
 import GDnsConfiguration from '@/components/ShootDns/GDnsConfiguration'
@@ -262,23 +268,24 @@ import GControlPlaneHighAvailabilityConfiguration from '@/components/ControlPlan
 import GControlPlaneHighAvailabilityTag from '@/components/ControlPlaneHighAvailability/GControlPlaneHighAvailabilityTag'
 import GSecretDetailsItemContent from '@/components/Secrets/GSecretDetailsItemContent'
 
+import { useShootResources } from '@/composables/useShootResources'
+import { useShootItem } from '@/composables/useShootItem'
+
 import {
   wildcardObjectsFromStrings,
   bestMatchForString,
 } from '@/utils/wildcard'
-import { shootItem } from '@/mixins/shootItem'
 
-import {
-  get,
-  find,
-  map,
-  head,
-} from '@/lodash'
+import head from 'lodash/head'
+import map from 'lodash/map'
+import find from 'lodash/find'
+import get from 'lodash/get'
 
 export default {
   components: {
     GCopyBtn,
     GShootSeedName,
+    GShootSecretName,
     GVendor,
     GDnsProvider,
     GDnsConfiguration,
@@ -287,31 +294,88 @@ export default {
     GControlPlaneHighAvailabilityTag,
     GSecretDetailsItemContent,
   },
-  mixins: [shootItem],
+  setup () {
+    const {
+      shootItem,
+      shootName,
+      shootNamespace,
+      shootSeedName,
+      shootCloudProfileName,
+      shootRegion,
+      shootZones,
+      shootDomain,
+      isCustomShootDomain,
+      shootSecretBindingName,
+      hasShootWorkerGroups,
+      shootControlPlaneHighAvailabilityFailureTolerance,
+      shootProviderType,
+      servicesCidr,
+      nodesCidr,
+      podsCidr,
+      shootTechnicalId,
+      shootDnsServiceExtensionProviders,
+      shootDnsPrimaryProvider,
+    } = useShootItem()
+
+    const { getResourceRefName } = useShootResources(shootItem)
+
+    return {
+      shootItem,
+      shootName,
+      shootNamespace,
+      shootSeedName,
+      shootCloudProfileName,
+      shootRegion,
+      shootZones,
+      shootDomain,
+      isCustomShootDomain,
+      shootSecretBindingName,
+      hasShootWorkerGroups,
+      shootControlPlaneHighAvailabilityFailureTolerance,
+      shootProviderType,
+      servicesCidr,
+      nodesCidr,
+      podsCidr,
+      shootTechnicalId,
+      shootDnsServiceExtensionProviders,
+      shootDnsPrimaryProvider,
+      getResourceRefName,
+    }
+  },
   computed: {
-    ...mapState(useAuthzStore, ['canPatchShootsBinding']),
-    ...mapState(useSecretStore, ['infrastructureSecretList']),
+    ...mapState(useGardenerExtensionStore, [
+      'hasDnsServiceExtension',
+    ]),
+    ...mapState(useAuthzStore, [
+      'canPatchShootsBinding',
+    ]),
+    ...mapState(useCredentialStore, [
+      'infrastructureSecretBindingsList',
+    ]),
     showSeedInfo () {
       return !!this.shootSeedName
     },
     shootIngressDomainText () {
-      const nginxIngressEnabled = get(this.shootItem, 'spec.addons.nginxIngress.enabled', false)
+      const nginxIngressEnabled = get(this.shootItem, ['spec', 'addons', 'nginxIngress', 'enabled'], false)
       if (!this.shootDomain || !nginxIngressEnabled) {
         return undefined
       }
       return `*.ingress.${this.shootDomain}`
     },
     shootLoadbalancerClasses () {
-      const shootLBClasses = get(this.shootItem, 'spec.provider.controlPlaneConfig.loadBalancerClasses')
+      const shootLBClasses = get(this.shootItem, ['spec', 'provider', 'controlPlaneConfig', 'loadBalancerClasses'])
       if (shootLBClasses) {
         // If the user defines the LB classes in the shoot mainfest, they completely replace the ones defined in the cloudprofile
         return shootLBClasses
       }
 
-      const availableFloatingPools = this.floatingPoolsByCloudProfileNameAndRegionAndDomain({ cloudProfileName: this.shootCloudProfileName, region: this.shootRegion })
+      const availableFloatingPools = this.floatingPoolsByCloudProfileNameAndRegionAndDomain({
+        cloudProfileName: this.shootCloudProfileName,
+        region: this.shootRegion,
+      })
       const floatingPoolWildCardObjects = wildcardObjectsFromStrings(map(availableFloatingPools, 'name'))
 
-      const shootFloatingPoolName = get(this.shootItem, 'spec.provider.infrastructureConfig.floatingPoolName')
+      const shootFloatingPoolName = get(this.shootItem, ['spec', 'provider', 'infrastructureConfig', 'floatingPoolName'])
       const floatingPoolWildcardName = bestMatchForString(floatingPoolWildCardObjects, shootFloatingPoolName)
 
       if (!floatingPoolWildcardName) {
@@ -319,25 +383,22 @@ export default {
       }
 
       const shootFloatingPool = find(availableFloatingPools, ['name', floatingPoolWildcardName.originalValue])
-      return get(shootFloatingPool, 'loadBalancerClasses')
+      return get(shootFloatingPool, ['loadBalancerClasses'])
     },
     defaultLoadbalancerClass () {
       const shootLBClasses = this.shootLoadbalancerClasses
 
-      let defaultLoadbalancerClass = find(shootLBClasses, { purpose: 'default' })
+      let defaultLoadbalancerClass = find(shootLBClasses, ['purpose', 'default'])
       if (defaultLoadbalancerClass) {
         return defaultLoadbalancerClass.name
       }
 
-      defaultLoadbalancerClass = find(shootLBClasses, { name: 'default' })
+      defaultLoadbalancerClass = find(shootLBClasses, ['name', 'default'])
       if (defaultLoadbalancerClass) {
         return defaultLoadbalancerClass.name
       }
 
-      return get(head(shootLBClasses), 'name')
-    },
-    canLinkToSecret () {
-      return this.shootSecretBindingName && this.shootNamespace
+      return get(head(shootLBClasses), ['name'])
     },
     customDomainChipText () {
       if (this.isCustomShootDomain) {
@@ -345,10 +406,8 @@ export default {
       }
       return 'generated'
     },
-    secret () {
-      const secrets = this.infrastructureSecretList
-      const secret = find(secrets, ['metadata.name', this.shootSecretBindingName])
-      return secret
+    secretBinding () {
+      return find(this.infrastructureSecretBindingsList, ['metadata.name', this.shootSecretBindingName])
     },
   },
   methods: {
@@ -356,7 +415,6 @@ export default {
       'cloudProfileByName',
       'floatingPoolsByCloudProfileNameAndRegionAndDomain',
     ]),
-    ...mapActions(useSecretStore, ['getCloudProviderSecretByName']),
   },
 }
 </script>

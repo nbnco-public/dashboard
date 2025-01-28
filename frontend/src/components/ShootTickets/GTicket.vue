@@ -5,15 +5,17 @@ SPDX-License-Identifier: Apache-2.0
 -->
 
 <template>
-  <v-card>
-    <v-card-title class="text-subtitle-1 mt-4 ticket-toolbar bg-toolbar-background text-toolbar-title">
-      <div class="d-flex flex-wrap align-center">
-        <div class="ticket-title mr-2">
+  <v-card class="mb-4">
+    <g-toolbar>
+      <div class="d-flex">
+        <div
+          class="ticket-title d-flex align-center"
+        >
           Ticket {{ ticketTitle }}
         </div>
         <div
           v-if="labels.length"
-          class="labels"
+          class="d-flex flex-wrap ml-2 ticket-labels"
         >
           <g-ticket-label
             v-for="label in labels"
@@ -22,8 +24,7 @@ SPDX-License-Identifier: Apache-2.0
           />
         </div>
       </div>
-    </v-card-title>
-
+    </g-toolbar>
     <v-container>
       <span class="font-weight-bold">{{ login }}</span> created this
       <g-external-link :url="ticketHtmlUrl">
@@ -52,14 +53,9 @@ SPDX-License-Identifier: Apache-2.0
         target="_blank"
         rel="noopener"
         title="Add Comment"
+        append-icon="mdi-open-in-new"
       >
         Add Comment
-        <v-icon
-          color="anchor"
-          class="link-icon pl-2"
-        >
-          mdi-open-in-new
-        </v-icon>
       </v-btn>
       <v-spacer />
     </v-card-actions>
@@ -80,7 +76,7 @@ import GTicketLabel from '@/components/ShootTickets/GTicketLabel.vue'
 import GTicketComment from '@/components/ShootTickets/GTicketComment.vue'
 import GExternalLink from '@/components/GExternalLink.vue'
 
-import { get } from '@/lodash'
+import get from 'lodash/get'
 
 export default {
   components: {
@@ -101,24 +97,24 @@ export default {
       ticketConfig: 'ticket',
     }),
     ticketTitle () {
-      const title = get(this.ticket, 'data.ticketTitle')
+      const title = get(this.ticket, ['data', 'ticketTitle'])
       return title ? ` - ${title}` : ''
     },
     login () {
-      return get(this.ticket, 'data.user.login')
+      return get(this.ticket, ['data', 'user', 'login'])
     },
     ticketHtmlUrl () {
-      return get(this.ticket, 'data.html_url')
+      return get(this.ticket, ['data', 'html_url'])
     },
     labels () {
-      return get(this.ticket, 'data.labels', [])
+      return get(this.ticket, ['data', 'labels'], [])
     },
     commentsForTicket () {
-      const issueNumber = get(this.ticket, 'metadata.number')
+      const issueNumber = get(this.ticket, ['metadata', 'number'])
       return this.ticketCommentsByIssueNumber({ issueNumber })
     },
     gitHubRepoUrl () {
-      return get(this.ticketConfig, 'gitHubRepoUrl')
+      return get(this.ticketConfig, ['gitHubRepoUrl'])
     },
     addCommentLink () {
       return `${this.ticketHtmlUrl}#new_comment_field`
@@ -133,16 +129,12 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-  .ticket-toolbar {
-    white-space: pre-wrap;
-    padding-top: 10px;
-    padding-bottom: 10px;
-  }
   .ticket-title {
     line-height: 20px;
   }
-  .labels {
-    line-height: 10px;
+  .ticket-labels {
+    overflow-y: scroll;
+    max-height: 30px;
   }
 
   .link-icon {

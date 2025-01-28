@@ -115,6 +115,23 @@ SPDX-License-Identifier: Apache-2.0
                   hint="Skip the login screen if no user input is required"
                 />
               </v-col>
+              <v-col
+                v-if="isShootAdminKubeconfigEnabled"
+                cols="12"
+              >
+                <legend class="text-medium-emphasis">
+                  Cluster Time-Limited Kubeconfig Lifetime
+                </legend>
+                <v-select
+                  v-model="shootAdminKubeconfigExpiration"
+                  :items="shootAdminKubeconfigExpirationItems"
+                  variant="solo-filled"
+                  density="compact"
+                  flat
+                  single-line
+                  class="w-25"
+                />
+              </v-col>
             </v-row>
           </v-card-text>
         </v-card>
@@ -139,16 +156,19 @@ SPDX-License-Identifier: Apache-2.0
                   label="Operator Features"
                   color="primary"
                   density="compact"
-                  hide-details
-                />
-                <div
-                  class="text-caption text-grey-darken-1"
+                  persistent-hint
+                  hint="Enable operator features for project cluster lists"
                 >
-                  <span class="font-weight-bold">Enable operator features for project cluster lists</span><br>
-                  You can set the focus mode for cluster lists. This mode will freeze the current
-                  list and allows to get an overview of clusters with issues by sorting the list by
-                  the <code>ISSUE SINCE</code> column.
-                </div>
+                  <template #message="{ message }">
+                    <div
+                      class="font-weight-bold pb-1"
+                      v-text="message"
+                    />
+                    You can set the focus mode for cluster lists. This mode will freeze the current
+                    list and allows to get an overview of clusters with issues by sorting the list by
+                    the <span class="font-family-monospace">ISSUE SINCE</span> column.
+                  </template>
+                </v-switch>
               </v-col>
             </v-row>
           </v-card-text>
@@ -160,10 +180,20 @@ SPDX-License-Identifier: Apache-2.0
 
 <script setup>
 import { storeToRefs } from 'pinia'
+import { computed } from 'vue'
 
 import { useLocalStorageStore } from '@/store/localStorage'
 
+import { useShootAdminKubeconfig } from '@/composables/useShootAdminKubeconfig'
+
 const localStorageStore = useLocalStorageStore()
+const shootAdminKubeconfig = useShootAdminKubeconfig()
+const {
+  expirations: shootAdminKubeconfigExpirations,
+  isEnabled: isShootAdminKubeconfigEnabled,
+  expiration: shootAdminKubeconfigExpiration,
+  humanizeExpiration,
+} = shootAdminKubeconfig
 
 const logLevels = [
   { value: 'debug', text: 'verbose', icon: 'mdi-bug', color: 'grey darken-4' },
@@ -179,4 +209,19 @@ const {
   colorScheme,
   operatorFeatures,
 } = storeToRefs(localStorageStore)
+
+const shootAdminKubeconfigExpirationItems = computed(() => {
+  return shootAdminKubeconfigExpirations.value.map(value => {
+    return {
+      value,
+      title: humanizeExpiration(value),
+    }
+  })
+})
 </script>
+
+<style lang="scss" scoped>
+:deep(.v-messages__message) {
+  line-height: 14px;
+}
+</style>

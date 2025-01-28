@@ -7,22 +7,19 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    :vendor="vendor"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
+    :provider-type="providerType"
     :create-title="`Add new ${name} Secret`"
     :replace-title="`Replace ${name} Secret`"
   >
     <template #secret-slot>
       <div>
         <v-text-field
-          ref="accessKeyId"
           v-model="accessKeyId"
           color="primary"
           label="Access Key Id"
-          :error-messages="getErrorMessages('accessKeyId')"
-          counter="128"
+          :error-messages="getErrorMessages(v$.accessKeyId)"
           hint="e.g. QNJebZ17v5Q7pYpP"
           variant="underlined"
           @update:model-value="v$.accessKeyId.$touch()"
@@ -34,10 +31,9 @@ SPDX-License-Identifier: Apache-2.0
           v-model="accessKeySecret"
           color="primary"
           label="Access Key Secret"
-          :error-messages="getErrorMessages('accessKeySecret')"
+          :error-messages="getErrorMessages(v$.accessKeySecret)"
           :append-icon="hideSecret ? 'mdi-eye' : 'mdi-eye-off'"
           :type="hideSecret ? 'password' : 'text'"
-          counter="30"
           hint="e.g. WJalrXUtnFEMIK7MDENG/bPxRfiCYz"
           variant="underlined"
           @click:append="() => (hideSecret = !hideSecret)"
@@ -47,7 +43,7 @@ SPDX-License-Identifier: Apache-2.0
       </div>
     </template>
     <template #help-slot>
-      <div v-if="vendor==='alicloud'">
+      <div v-if="providerType==='alicloud'">
         <p>
           Before you can provision and access a Kubernetes cluster on Alibaba Cloud, you need to add account credentials. To manage
           credentials for Alibaba Cloud Resource Access Management (RAM), use the
@@ -72,19 +68,21 @@ SPDX-License-Identifier: Apache-2.0
           user: AliyunECSFullAccess, AliyunSLBFullAccess, AliyunVPCFullAccess, AliyunEIPFullAccess, AliyunNATGatewayFullAccess.
         </p>
         <g-code-block
-          height="100%"
+          max-height="100%"
           lang="json"
           :content="JSON.stringify(template, undefined, 2)"
         />
       </div>
-      <div v-if="vendor==='alicloud-dns'">
+      <div v-if="providerType==='alicloud-dns'">
         <p>
           You need to provide an access key (access key ID and secret access key) for Alibaba Cloud to allow the dns-controller-manager to authenticate to Alibaba Cloud DNS.
         </p>
         <p>
-          For details see <g-external-link url="https://github.com/aliyun/alibaba-cloud-sdk-go/blob/master/docs/2-Client-EN.md#accesskey-client">
+          For details see
+          <g-external-link url="https://github.com/aliyun/alibaba-cloud-sdk-go/blob/master/docs/2-Client-EN.md#accesskey-client">
             AccessKey Client
-          </g-external-link>. Currently the regionId is fixed to cn-shanghai.
+          </g-external-link>.
+          Currently the regionId is fixed to cn-shanghai.
         </p>
       </div>
     </template>
@@ -103,22 +101,10 @@ import GSecretDialog from '@/components/Secrets/GSecretDialog'
 import GCodeBlock from '@/components/GCodeBlock'
 import GExternalLink from '@/components/GExternalLink'
 
-import {
-  getValidationErrors,
-  setDelayedInputFocus,
-} from '@/utils'
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
 
-const validationErrors = {
-  accessKeyId: {
-    required: 'You can\'t leave this empty.',
-    minLength: 'It must contain at least 16 characters.',
-    maxLength: 'It exceeds the maximum length of 128 characters.',
-  },
-  accessKeySecret: {
-    required: 'You can\'t leave this empty.',
-    minLength: 'It must contain at least 30 characters.',
-  },
-}
+import { getErrorMessages } from '@/utils'
+import { withFieldName } from '@/utils/validators'
 
 export default {
   components: {
@@ -131,10 +117,10 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
-    vendor: {
+    providerType: {
       type: String,
     },
   },
@@ -142,16 +128,25 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const {
+      accessKeyId,
+      accessKeySecret,
+    } = secretStringDataRefs({
+      accessKeyID: 'accessKeyId',
+      accessKeySecret: 'accessKeySecret',
+    })
+
     return {
+      accessKeyId,
+      accessKeySecret,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      accessKeyId: undefined,
-      accessKeySecret: undefined,
       hideSecret: true,
-      validationErrors,
       template: {
         Statement: [
           {
@@ -189,8 +184,17 @@ export default {
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      accessKeyId: withFieldName('Access Key ID', {
+        required,
+        minLength: minLength(16),
+        maxLength: maxLength(128),
+      }),
+      accessKeySecret: withFieldName('Access Key Secret', {
+        required,
+        minLength: minLength(30),
+      }),
+    }
   },
   computed: {
     visible: {
@@ -205,59 +209,20 @@ export default {
       return !this.v$.$invalid
     },
     name () {
-      if (this.vendor === 'alicloud') {
+      if (this.providerType === 'alicloud') {
         return 'Alibaba Cloud'
       }
-      if (this.vendor === 'alicloud-dns') {
+      if (this.providerType === 'alicloud-dns') {
         return 'Alicloud DNS'
       }
       return undefined
-    },
-    secretData () {
-      return {
-        accessKeyID: this.accessKeyId,
-        accessKeySecret: this.accessKeySecret,
-      }
-    },
-    validators () {
-      const validators = {
-        accessKeyId: {
-          required,
-          minLength: minLength(16),
-          maxLength: maxLength(128),
-        },
-        accessKeySecret: {
-          required,
-          minLength: minLength(30),
-        },
-      }
-      return validators
     },
     isCreateMode () {
       return !this.secret
     },
   },
-  watch: {
-    value: function (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
   methods: {
-    reset () {
-      this.v$.$reset()
-
-      this.accessKeyId = ''
-      this.accessKeySecret = ''
-
-      if (!this.isCreateMode) {
-        setDelayedInputFocus(this, 'accessKeyId')
-      }
-    },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>

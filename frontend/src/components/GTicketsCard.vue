@@ -10,49 +10,38 @@ SPDX-License-Identifier: Apache-2.0
     class="mb-4"
   >
     <template v-if="tickets.length">
-      <v-card
+      <g-ticket
         v-for="ticket in tickets"
         :key="ticket.metadata.issueNumber"
-      >
-        <g-ticket :ticket="ticket" />
-      </v-card>
-      <div class="d-flex align-center justify-center mt-4">
+        :ticket="ticket"
+      />
+      <div class="d-flex align-center justify-center">
         <v-btn
-          text
+          variant="tonal"
           color="primary"
-          :href="sanitizeUrl(createTicketLink)"
+          :href="sanitizeUrl(ticketLink)"
           target="_blank"
           rel="noopener"
           title="Create Ticket"
+          append-icon="mdi-open-in-new"
         >
-          <span class="pr-2">Create Ticket</span>
-          <v-icon
-            color="primary"
-            class="link-icon"
-          >
-            mdi-open-in-new
-          </v-icon>
+          Create Ticket
         </v-btn>
       </div>
     </template>
     <v-card v-else>
-      <g-toolbar title="Ticket" />
-      <div class="d-flex justify-center pa-3">
+      <g-toolbar title="Tickets" />
+      <div class="d-flex justify-center pa-4">
         <v-btn
-          variant="text"
+          variant="tonal"
           color="primary"
-          :href="sanitizeUrl(createTicketLink)"
+          :href="sanitizeUrl(ticketLink)"
           target="_blank"
           rel="noopener"
           title="Create Ticket"
+          append-icon="mdi-open-in-new"
         >
-          <span class="pr-2">Create Ticket</span>
-          <v-icon
-            color="primary"
-            class="link-icon"
-          >
-            mdi-open-in-new
-          </v-icon>
+          Create Ticket
         </v-btn>
       </div>
     </v-card>
@@ -70,23 +59,46 @@ import { useTicketStore } from '@/store/ticket'
 
 import GTicket from '@/components/ShootTickets/GTicket'
 
-import { shootItem } from '@/mixins/shootItem'
+import { useShootItem } from '@/composables/useShootItem'
+
 import moment from '@/utils/moment'
 
-import {
-  get,
-  join,
-  map,
-  template,
-  uniq,
-} from '@/lodash'
+import get from 'lodash/get'
+import map from 'lodash/map'
+import template from 'lodash/template'
+import uniq from 'lodash/uniq'
+import cloneDeep from 'lodash/cloneDeep'
 
 export default {
   components: {
     GTicket,
   },
-  mixins: [shootItem],
   inject: ['sanitizeUrl'],
+  setup () {
+    const {
+      shootItem,
+      shootNamespace,
+      shootName,
+      shootProjectName,
+      shootCreatedAt,
+      shootProviderType,
+      shootRegion,
+      shootSeedName,
+      shootAccessRestrictions,
+    } = useShootItem()
+
+    return {
+      shootItem,
+      shootNamespace,
+      shootName,
+      shootProjectName,
+      shootCreatedAt,
+      shootProviderType,
+      shootRegion,
+      shootSeedName,
+      shootAccessRestrictions,
+    }
+  },
   computed: {
     ...mapState(useConfigStore, {
       ticketConfig: 'ticket',
@@ -98,52 +110,69 @@ export default {
       })
     },
     gitHubRepoUrl () {
-      return get(this.ticketConfig, 'gitHubRepoUrl')
+      return get(this.ticketConfig, ['gitHubRepoUrl'])
     },
-    newTicketLabels () {
-      return get(this.ticketConfig, 'newTicketLabels')
+    shootUrl () {
+      const url = new URL(`/namespace/${this.shootNamespace}/shoots/${this.shootName}`, window.location)
+      return url.toString()
     },
-    issueDescription () {
-      const descriptionTemplate = get(this.ticketConfig, 'issueDescriptionTemplate')
-      const compiled = template(descriptionTemplate)
-      return compiled({
+    shootMachineImageNames () {
+      const workers = get(this.shootItem, ['spec', 'provider', 'workers'])
+      let imageNames = map(workers, worker => get(worker, ['machine', 'image', 'name']))
+      imageNames = uniq(imageNames)
+      return imageNames.join(', ')
+    },
+    ticketLink () {
+      const newIssue = cloneDeep(get(this.ticketConfig, ['newIssue'], {}))
+      if (!newIssue.title) {
+        newIssue.title = `[${this.shootProjectName}/${this.shootName}]`
+      }
+
+      const options = {
         shootName: this.shootName,
         shootNamespace: this.shootNamespace,
         shootCreatedAt: this.shootCreatedAt,
         shootUrl: this.shootUrl,
-        providerType: this.shootCloudProviderKind,
+        providerType: this.shootProviderType,
         region: this.shootRegion,
         machineImageNames: this.shootMachineImageNames,
         projectName: this.shootProjectName,
         utcDateTimeNow: moment().utc().format(),
         seedName: this.shootSeedName,
-        accessRestrictions: this.shootSelectedAccessRestrictions,
-      })
-    },
-    shootUrl () {
-      return `${window.location.origin}/namespace/${this.shootNamespace}/shoots/${this.shootName}`
-    },
-    shootMachineImageNames () {
-      const workers = get(this.shootItem, 'spec.provider.workers')
-      let imageNames = map(workers, worker => get(worker, 'machine.image.name'))
-      imageNames = uniq(imageNames)
-      return imageNames.join(', ')
-    },
-    newTicketLabelsString () {
-      return join(this.newTicketLabels, ',')
-    },
-    createTicketLink () {
-      const ticketTitle = encodeURIComponent(`[${this.shootProjectName}/${this.shootName}]`)
-      const body = encodeURIComponent(this.issueDescription)
-      const newTicketLabels = encodeURIComponent(this.newTicketLabelsString)
+        accessRestrictions: this.shootAccessRestrictions,
+      }
 
-      return `${this.gitHubRepoUrl}/issues/new?title=${ticketTitle}&body=${body}&labels=${newTicketLabels}`
+      const baseUrl = new URL(this.gitHubRepoUrl)
+      if (!baseUrl.pathname.endsWith('/')) {
+        baseUrl.pathname += '/'
+      }
+      const url = new URL('issues/new', baseUrl)
+      for (const [key, value] of Object.entries(newIssue)) {
+        if (typeof value === 'string') {
+          const templatedValue = this.applyTemplate(value, options)
+          url.searchParams.append(key, templatedValue)
+        } else if (Array.isArray(value)) {
+          const templatedValues = value.map(v => {
+            return this.applyTemplate(v, options)
+          })
+          url.searchParams.append(key, templatedValues)
+        }
+      }
+      return url.toString()
     },
   },
   methods: {
     ...mapActions(useTicketStore, {
       ticketsByProjectAndName: 'issues',
     }),
+    applyTemplate (value, options) {
+      if (!value) {
+        return ''
+      }
+
+      const compiled = template(value)
+      return compiled(options)
+    },
   },
 }
 </script>

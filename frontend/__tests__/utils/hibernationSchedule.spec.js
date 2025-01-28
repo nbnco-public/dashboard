@@ -5,8 +5,9 @@
 //
 
 import {
-  parsedScheduleEventsFromCrontabBlock,
-  crontabFromParsedScheduleEvents,
+  parseCronExpression,
+  scheduleEventsFromCrontabBlock,
+  crontabBlocksFromScheduleEvents,
 } from '@/utils/hibernationSchedule'
 import moment from '@/utils/moment'
 
@@ -14,14 +15,36 @@ const currentLocation = moment.tz.guess()
 
 describe('utils', () => {
   describe('hibernationSchedule', () => {
-    describe('#parsedScheduleEventsFromCrontabBlock', () => {
+    describe('#parseCronExpression', () => {
+      it('should parse a crontab expressions', () => {
+        expect(parseCronExpression('0 8 * * 1')).toEqual({
+          hour: '8',
+          minute: '0',
+          weekdays: '1',
+        })
+        expect(parseCronExpression('00 12 * * 1,2,3,4,5').weekdays).toBe('1,2,3,4,5')
+        expect(parseCronExpression('00 12 * * MON,TUE,WED,THU,FRI').weekdays).toBe('1,2,3,4,5')
+        expect(parseCronExpression('00 12 * * 1-5').weekdays).toBe('1,2,3,4,5')
+        expect(parseCronExpression('00 12 * * 7').weekdays).toBe('0')
+        expect(parseCronExpression('00 12 * * *').weekdays).toBe('1,2,3,4,5,6,0')
+        expect(parseCronExpression('00 12 * * SAT,SUN').weekdays).toBe('6,0')
+      })
+
+      it('should fail to parse a crontab expressions', () => {
+        expect(parseCronExpression('00 12 * * FR')).toBeUndefined()
+        expect(parseCronExpression('00 12 * * 8')).toBeUndefined()
+        expect(parseCronExpression('00 12 0 * 1')).toBeUndefined()
+        expect(parseCronExpression('00 12 * 0 1')).toBeUndefined()
+      })
+    })
+    describe('#scheduleEventsFromCrontabBlock', () => {
       it('should parse a simple crontab block', () => {
         const crontabBlock = {
           start: '00 17 * * 1,2,3,4,5',
           end: '00 08 * * 1,2,3,4,5',
           location: 'Europe/Berlin',
         }
-        const scheduleEvents = parsedScheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
+        const scheduleEvents = scheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
         expect(scheduleEvents).toBeInstanceOf(Array)
         expect(scheduleEvents).toHaveLength(1)
         const { start, end, location } = scheduleEvents[0]
@@ -37,7 +60,7 @@ describe('utils', () => {
         }
         const expectedStartMoment = moment.utc('1700', 'HHmm')
         const expectedEndMoment = moment.utc('0800', 'HHmm')
-        const scheduleEvents = parsedScheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
+        const scheduleEvents = scheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
         expect(scheduleEvents).toBeInstanceOf(Array)
         expect(scheduleEvents).toHaveLength(2)
         const { start, location } = scheduleEvents[0]
@@ -63,7 +86,7 @@ describe('utils', () => {
         end: '30 07 * * 1-2,3,4-6,0',
         location: 'Europe/Berlin',
       }
-      const scheduleEvents = parsedScheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
+      const scheduleEvents = scheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
       expect(scheduleEvents).toBeInstanceOf(Array)
       expect(scheduleEvents).toHaveLength(1)
       const { end, location } = scheduleEvents[0]
@@ -80,7 +103,7 @@ describe('utils', () => {
         end: '30 07 * * 1-2,Sun,3-5',
         location: 'Europe/Berlin',
       }
-      const scheduleEvents = parsedScheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
+      const scheduleEvents = scheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
       expect(scheduleEvents).toBeInstanceOf(Array)
       expect(scheduleEvents).toHaveLength(1)
       const { end, location } = scheduleEvents[0]
@@ -97,7 +120,7 @@ describe('utils', () => {
         start: '00 20 * * mon,TUE,wEd,Thu,7',
         location: 'America/Los_Angeles',
       }
-      const scheduleEvents = parsedScheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
+      const scheduleEvents = scheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
       expect(scheduleEvents).toBeInstanceOf(Array)
       expect(scheduleEvents).toHaveLength(1)
       const { start, location } = scheduleEvents[0]
@@ -114,7 +137,7 @@ describe('utils', () => {
         start: '00 20 * * *',
       }
       const expectedStartMoment = moment.utc('2000', 'HHmm')
-      const scheduleEvents = parsedScheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
+      const scheduleEvents = scheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
       expect(scheduleEvents).toBeInstanceOf(Array)
       expect(scheduleEvents).toHaveLength(1)
       const { start, location } = scheduleEvents[0]
@@ -131,7 +154,7 @@ describe('utils', () => {
         end: '12 09 * * 1,1,Mon,7,Tue-Thu,4-6',
         location: 'Europe/Berlin',
       }
-      const scheduleEvents = parsedScheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
+      const scheduleEvents = scheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
       expect(scheduleEvents).toBeInstanceOf(Array)
       expect(scheduleEvents).toHaveLength(1)
       const { end, location } = scheduleEvents[0]
@@ -148,7 +171,7 @@ describe('utils', () => {
         end: '12 09 * * Mon,Tue,Wed,Thu,Fri,Sat,Sun',
         location: 'Europe/Berlin',
       }
-      const scheduleEvents = parsedScheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
+      const scheduleEvents = scheduleEventsFromCrontabBlock(crontabBlock, currentLocation)
       expect(scheduleEvents).toBeInstanceOf(Array)
       expect(scheduleEvents).toHaveLength(1)
       const { end, location } = scheduleEvents[0]
@@ -161,9 +184,9 @@ describe('utils', () => {
     })
   })
 
-  describe('#crontabFromParsedScheduleEvents', () => {
-    it('should produce a crontab from an array of parsedScheduleEvents', () => {
-      const parsedScheduleEvents = [
+  describe('#crontabBlocksFromScheduleEvents', () => {
+    it('should produce a crontab from an array of scheduleEvents', () => {
+      const scheduleEvents = [
         {
           start: {
             hour: '17',
@@ -187,8 +210,8 @@ describe('utils', () => {
         },
       ]
 
-      const { scheduleCrontab } = crontabFromParsedScheduleEvents(parsedScheduleEvents)
-      const expectedCrontab = [
+      const crontabBlocks = crontabBlocksFromScheduleEvents(scheduleEvents)
+      const expectedCrontabBlocks = [
         {
           start: '00 17 * * 1,2,3,4,5',
           end: '00 08 * * 1,2,3,4,5',
@@ -199,8 +222,8 @@ describe('utils', () => {
           location: 'America/Los_Angeles',
         },
       ]
-      expect(scheduleCrontab).toBeInstanceOf(Array)
-      expect(scheduleCrontab).toEqual(expectedCrontab)
+      expect(crontabBlocks).toBeInstanceOf(Array)
+      expect(crontabBlocks).toEqual(expectedCrontabBlocks)
     })
   })
 })

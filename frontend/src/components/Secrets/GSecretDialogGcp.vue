@@ -7,24 +7,26 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    :vendor="vendor"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
+    :provider-type="providerType"
     :create-title="`Add new ${name} Secret`"
     :replace-title="`Replace ${name} Secret`"
   >
     <template #secret-slot>
       <div>
         <v-textarea
-          ref="serviceAccountKey"
+          ref="serviceAccountKeyRef"
           v-model="serviceAccountKey"
           color="primary"
           variant="filled"
           label="Service Account Key"
-          :error-messages="getErrorMessages('serviceAccountKey')"
+          :error-messages="getErrorMessages(v$.serviceAccountKey)"
           hint="Enter or drop a service account key in JSON format"
           persistent-hint
+          :append-icon="hideSecret ? 'mdi-eye' : 'mdi-eye-off'"
+          :class="{ 'hide-secret': hideSecret }"
+          @click:append="() => (hideSecret = !hideSecret)"
           @update:model-value="v$.serviceAccountKey.$touch()"
           @blur="v$.serviceAccountKey.$touch()"
         />
@@ -32,7 +34,7 @@ SPDX-License-Identifier: Apache-2.0
     </template>
     <template #help-slot>
       <div
-        v-if="vendor==='gcp'"
+        v-if="providerType==='gcp'"
         class="help-content"
       >
         <p>
@@ -44,13 +46,14 @@ SPDX-License-Identifier: Apache-2.0
 
         <p>
           Ensure that the service account has at least the roles below.
-          <ul>
-            <li>Service Account Admin</li>
-            <li>Service Account Token Creator</li>
-            <li>Service Account User</li>
-            <li>Compute Admin</li>
-          </ul>
         </p>
+
+        <ul>
+          <li>Service Account Admin</li>
+          <li>Service Account Token Creator</li>
+          <li>Service Account User</li>
+          <li>Compute Admin</li>
+        </ul>
 
         <p>
           The Service Account has to be enabled for the Google Identity and Access Management API.
@@ -64,12 +67,15 @@ SPDX-License-Identifier: Apache-2.0
           to service accounts.
         </p>
       </div>
-      <div v-if="vendor==='google-clouddns'">
+      <div v-if="providerType==='google-clouddns'">
         <p>
           You need to provide a service account and a key (serviceaccount.json) to allow the dns-controller-manager to authenticate and execute calls to Cloud DNS.
         </p>
         <p>
-          For details on Cloud DNS see <g-external-link url="https://cloud.google.com/dns/docs/zones" />, and on Service Accounts see <g-external-link url="https://cloud.google.com/iam/docs/service-accounts" />
+          For details on Cloud DNS see
+          <g-external-link url="https://cloud.google.com/dns/docs/zones" />,
+          and on Service Accounts see
+          <g-external-link url="https://cloud.google.com/iam/docs/service-accounts" />
         </p>
         <p>
           The service account needs permissions on the hosted zone to list and change DNS records. For details on which permissions or roles are required see <g-external-link url="https://cloud.google.com/dns/docs/access-control" />. A possible role is roles/dns.admin "DNS Administrator".
@@ -86,19 +92,17 @@ import { required } from '@vuelidate/validators'
 import GSecretDialog from '@/components/Secrets/GSecretDialog'
 import GExternalLink from '@/components/GExternalLink'
 
-import { serviceAccountKey } from '@/utils/validators'
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
+
+import {
+  withFieldName,
+  withMessage,
+} from '@/utils/validators'
 import {
   handleTextFieldDrop,
-  getValidationErrors,
+  getErrorMessages,
   setDelayedInputFocus,
 } from '@/utils'
-
-const validationErrors = {
-  serviceAccountKey: {
-    required: 'You can\'t leave this empty.',
-    serviceAccountKey: 'Not a valid Service Account Key',
-  },
-}
 
 export default {
   components: {
@@ -110,10 +114,10 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
-    vendor: {
+    providerType: {
       type: String,
     },
   },
@@ -121,20 +125,58 @@ export default {
     'update:modelValue',
   ],
   setup () {
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const { serviceAccountKey } = secretStringDataRefs({
+      'serviceaccount.json': 'serviceAccountKey',
+    })
+
     return {
+      serviceAccountKey,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      serviceAccountKey: undefined,
-      validationErrors,
+      hideSecret: true,
       dropHandlerInitialized: false,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    const projectIDTestPattern = /^[a-z][a-z0-9-]{4,28}[a-z0-9]+$/
+
+    return {
+      serviceAccountKey: withFieldName('Service Account Key',
+        {
+          required,
+          validJson: withMessage('Not a valid JSON', value => {
+            try {
+              JSON.parse(value)
+              return true
+            } catch (err) {
+              return false
+            }
+          }),
+          projectID: withMessage('Must contain a valid `project_id`', value => {
+            try {
+              const key = JSON.parse(value)
+              return key.project_id && projectIDTestPattern.test(key.project_id)
+            } catch (err) {
+              return false
+            }
+          }),
+          type: withMessage('Credential `type` must be "service_account"', value => {
+            try {
+              const key = JSON.parse(value)
+              return key.type && key.type === 'service_account'
+            } catch (err) {
+              return false
+            }
+          }),
+
+        },
+      ),
+    }
   },
   computed: {
     visible: {
@@ -148,28 +190,14 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    secretData () {
-      return {
-        'serviceaccount.json': this.serviceAccountKey,
-      }
-    },
-    validators () {
-      const validators = {
-        serviceAccountKey: {
-          required,
-          serviceAccountKey,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
     name () {
-      if (this.vendor === 'gcp') {
+      if (this.providerType === 'gcp') {
         return 'Google'
       }
-      if (this.vendor === 'google-clouddns') {
+      if (this.providerType === 'google-clouddns') {
         return 'Google Cloud DNS'
       }
       return undefined
@@ -200,20 +228,18 @@ export default {
         setDelayedInputFocus(this, 'serviceAccountKey')
       }
     },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
     initializeDropHandlerOnce () {
       if (this.dropHandlerInitialized) {
         return
       }
 
       this.dropHandlerInitialized = true
-      const onDrop = (value) => {
+      const onDrop = value => {
         this.serviceAccountKey = value
       }
-      handleTextFieldDrop(this.$refs.serviceAccountKey, /json/, onDrop)
+      handleTextFieldDrop(this.$refs.serviceAccountKeyRef, /json/, onDrop)
     },
+    getErrorMessages,
   },
 }
 </script>
@@ -225,7 +251,7 @@ export default {
     font-size: 14px;
   }
 
-    .help-content {
+  .help-content {
     ul {
       margin-top: 20px;
       margin-bottom: 20px;
@@ -237,6 +263,12 @@ export default {
         font-weight: 300;
         font-size: 16px;
       }
+    }
+  }
+
+  .hide-secret {
+    :deep(.v-input__control textarea) {
+      -webkit-text-security: disc;
     }
   }
 

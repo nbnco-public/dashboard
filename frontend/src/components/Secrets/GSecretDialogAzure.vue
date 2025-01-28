@@ -7,21 +7,19 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <g-secret-dialog
     v-model="visible"
-    :data="secretData"
-    :data-valid="valid"
-    :secret="secret"
-    :vendor="vendor"
+    :secret-validations="v$"
+    :secret-binding="secretBinding"
+    :provider-type="providerType"
     :create-title="`Add new ${name} Secret`"
     :replace-title="`Replace ${name} Secret`"
   >
     <template #secret-slot>
       <div>
         <v-text-field
-          ref="clientId"
           v-model="clientId"
           color="primary"
           label="Client Id"
-          :error-messages="getErrorMessages('clientId')"
+          :error-messages="getErrorMessages(v$.clientId)"
           variant="underlined"
           @update:model-value="v$.clientId.$touch()"
           @blur="v$.clientId.$touch()"
@@ -34,7 +32,7 @@ SPDX-License-Identifier: Apache-2.0
           :append-icon="hideSecret ? 'mdi-eye' : 'mdi-eye-off'"
           :type="hideSecret ? 'password' : 'text'"
           label="Client Secret"
-          :error-messages="getErrorMessages('clientSecret')"
+          :error-messages="getErrorMessages(v$.clientSecret)"
           variant="underlined"
           @click:append="() => (hideSecret = !hideSecret)"
           @update:model-value="v$.clientSecret.$touch()"
@@ -46,7 +44,7 @@ SPDX-License-Identifier: Apache-2.0
           v-model="tenantId"
           color="primary"
           label="Tenant Id"
-          :error-messages="getErrorMessages('tenantId')"
+          :error-messages="getErrorMessages(v$.tenantId)"
           variant="underlined"
           @update:model-value="v$.tenantId.$touch()"
           @blur="v$.tenantId.$touch()"
@@ -57,15 +55,25 @@ SPDX-License-Identifier: Apache-2.0
           v-model="subscriptionId"
           color="primary"
           label="Subscription Id"
-          :error-messages="getErrorMessages('subscriptionId')"
+          :error-messages="getErrorMessages(v$.subscriptionId)"
           variant="underlined"
           @update:model-value="v$.subscriptionId.$touch()"
           @blur="v$.subscriptionId.$touch()"
         />
       </div>
+      <div v-if="isDNSSecret">
+        <v-select
+          v-model="azureCloud"
+          color="primary"
+          item-color="primary"
+          label="Azure Cloud"
+          :items="['AzurePublic', 'AzureChina', 'AzureGovernment']"
+          variant="underlined"
+        />
+      </div>
     </template>
     <template #help-slot>
-      <div v-if="vendor==='azure'">
+      <div v-if="providerType==='azure'">
         <p>
           Before you can provision and access a Kubernetes cluster on Azure, you need to add account/subscription credentials.
           The Gardener needs the credentials of a service principal assigned to an account/subscription to provision
@@ -73,7 +81,7 @@ SPDX-License-Identifier: Apache-2.0
         </p>
         <p>
           Ensure that the service principal has the permissions defined
-          <g-external-link url="https://github.com/gardener/gardener-extension-provider-azure/blob/master/docs/azure-permissions.md">
+          <g-external-link url="https://github.com/gardener/gardener-extension-provider-azure/blob/master/docs/usage/azure-permissions.md">
             here
           </g-external-link> within your subscription assigned.
           If no fine-grained permissions are required then assign the <strong>Contributor</strong> role.
@@ -85,11 +93,13 @@ SPDX-License-Identifier: Apache-2.0
           </g-external-link> on how to manage your credentials and subscriptions.
         </p>
       </div>
-      <div v-if="vendor==='azure-dns' || vendor==='azure-private-dns'">
+      <div v-if="isDNSSecret">
         <p>
-          Follow the steps as described in the Azure documentation to <g-external-link url="https://docs.microsoft.com/en-us/azure/dns/dns-sdk#create-a-service-principal-account">
+          Follow the steps as described in the Azure documentation to
+          <g-external-link url="https://docs.microsoft.com/en-us/azure/dns/dns-sdk#create-a-service-principal-account">
             create a service principal account
-          </g-external-link> and grant the service principal account 'DNS Zone Contributor' permissions to the resource group.
+          </g-external-link>
+          and grant the service principal account 'DNS Zone Contributor' permissions to the resource group.
         </p>
       </div>
     </template>
@@ -99,29 +109,18 @@ SPDX-License-Identifier: Apache-2.0
 <script>
 import { useVuelidate } from '@vuelidate/core'
 import { required } from '@vuelidate/validators'
+import { computed } from 'vue'
 
 import GSecretDialog from '@/components/Secrets/GSecretDialog'
 import GExternalLink from '@/components/GExternalLink'
 
-import {
-  getValidationErrors,
-  setDelayedInputFocus,
-} from '@/utils'
+import { useProvideCredentialContext } from '@/composables/useCredentialContext'
 
-const validationErrors = {
-  clientId: {
-    required: 'You can\'t leave this empty.',
-  },
-  clientSecret: {
-    required: 'You can\'t leave this empty.',
-  },
-  tenantId: {
-    required: 'You can\'t leave this empty.',
-  },
-  subscriptionId: {
-    required: 'You can\'t leave this empty.',
-  },
-}
+import {
+  withFieldName,
+  guid,
+} from '@/utils/validators'
+import { getErrorMessages } from '@/utils'
 
 export default {
   components: {
@@ -133,34 +132,70 @@ export default {
       type: Boolean,
       required: true,
     },
-    secret: {
+    secretBinding: {
       type: Object,
     },
-    vendor: {
+    providerType: {
       type: String,
     },
   },
   emits: [
     'update:modelValue',
   ],
-  setup () {
+  setup (props) {
+    const isDNSSecret = computed(() => {
+      return props.providerType === 'azure-dns' || props.providerType === 'azure-private-dns'
+    })
+
+    const { secretStringDataRefs } = useProvideCredentialContext()
+
+    const {
+      clientId,
+      clientSecret,
+      tenantId,
+      subscriptionId,
+      azureCloud,
+    } = secretStringDataRefs({
+      clientID: 'clientId',
+      clientSecret: 'clientSecret',
+      tenantID: 'tenantId',
+      subscriptionID: 'subscriptionId',
+      AZURE_CLOUD: 'azureCloud',
+    })
+
     return {
+      clientId,
+      clientSecret,
+      tenantId,
+      subscriptionId,
+      azureCloud,
+      isDNSSecret,
       v$: useVuelidate(),
     }
   },
   data () {
     return {
-      clientId: undefined,
-      clientSecret: undefined,
-      tenantId: undefined,
-      subscriptionId: undefined,
       hideSecret: true,
-      validationErrors,
     }
   },
   validations () {
-    // had to move the code to a computed property so that the getValidationErrors method can access it
-    return this.validators
+    return {
+      clientId: withFieldName('Client ID', {
+        required,
+        guid,
+      }),
+      clientSecret: withFieldName('Client Secret', {
+        required,
+      }),
+      tenantId: withFieldName('Tenant ID', {
+        required,
+        guid,
+      }),
+      subscriptionId: withFieldName('Subscription ID', {
+        required,
+        guid,
+      }),
+    }
   },
   computed: {
     visible: {
@@ -174,70 +209,24 @@ export default {
     valid () {
       return !this.v$.$invalid
     },
-    secretData () {
-      return {
-        clientID: this.clientId,
-        clientSecret: this.clientSecret,
-        subscriptionID: this.subscriptionId,
-        tenantID: this.tenantId,
-      }
-    },
-    validators () {
-      const validators = {
-        clientId: {
-          required,
-        },
-        clientSecret: {
-          required,
-        },
-        tenantId: {
-          required,
-        },
-        subscriptionId: {
-          required,
-        },
-      }
-      return validators
-    },
     isCreateMode () {
       return !this.secret
     },
     name () {
-      if (this.vendor === 'azure') {
+      if (this.providerType === 'azure') {
         return 'Azure'
       }
-      if (this.vendor === 'azure-dns') {
+      if (this.providerType === 'azure-dns') {
         return 'Azure DNS'
       }
-      if (this.vendor === 'azure-private-dns') {
+      if (this.providerType === 'azure-private-dns') {
         return 'Azure Private DNS'
       }
       return undefined
     },
   },
-  watch: {
-    value: function (value) {
-      if (value) {
-        this.reset()
-      }
-    },
-  },
   methods: {
-    reset () {
-      this.v$.$reset()
-
-      this.clientId = ''
-      this.clientSecret = ''
-      this.subscriptionId = ''
-      this.tenantId = ''
-
-      if (!this.isCreateMode) {
-        setDelayedInputFocus(this, 'clientId')
-      }
-    },
-    getErrorMessages (field) {
-      return getValidationErrors(this, field)
-    },
+    getErrorMessages,
   },
 }
 </script>
