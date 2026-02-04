@@ -7,20 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 <template>
   <div class="d-flex my-2 mx-4">
     <div class="mr-2">
-      <v-avatar
-        v-if="avatarUrl"
-        size="40px"
-      >
-        <v-img
-          :src="avatarUrl"
-          :title="login"
-          :alt="`avatar of github user ${login}`"
-        />
-      </v-avatar>
-      <v-icon
-        v-else
-        icon="mdi-comment-outline"
-        color="primary"
+      <g-ticket-avatar
+        :login="login"
+        :github-avatar-url="githubAvatarUrl"
+        :alt="`avatar of github user ${login}`"
       />
     </div>
     <div class="comment d-flex flex-column flex-grow-1">
@@ -49,30 +39,25 @@ SPDX-License-Identifier: Apache-2.0
 </template>
 
 <script>
-import { mapState } from 'pinia'
-
-import { useConfigStore } from '@/store/config'
+import {
+  computed,
+  toRefs,
+} from 'vue'
+import { useTheme } from 'vuetify'
 
 import GTimeString from '@/components/GTimeString.vue'
 import GExternalLink from '@/components/GExternalLink.vue'
+import GTicketAvatar from '@/components/GTicketAvatar.vue'
 
-import {
-  gravatarUrlIdenticon,
-  transformHtml,
-} from '@/utils'
+import { transformHtml } from '@/utils'
 
 import get from 'lodash/get'
-
-const AvatarEnum = {
-  GITHUB: 'github', // default
-  GRAVATAR: 'gravatar',
-  NONE: 'none',
-}
 
 export default {
   components: {
     GTimeString,
     GExternalLink,
+    GTicketAvatar,
   },
   props: {
     comment: {
@@ -80,38 +65,42 @@ export default {
       required: true,
     },
   },
-  computed: {
-    ...mapState(useConfigStore, {
-      ticketConfig: 'ticket',
-    }),
-    commentHtml () {
-      return transformHtml(get(this.comment, ['data', 'body'], ''))
-    },
-    login () {
-      return get(this.comment, ['data', 'user', 'login'])
-    },
-    createdAt () {
-      return get(this.comment, ['metadata', 'created_at'])
-    },
-    avatarSource () {
-      return get(this.ticketConfig, ['avatarSource'], AvatarEnum.GITHUB)
-    },
-    avatarUrl () {
-      switch (this.avatarSource) {
-        case AvatarEnum.GITHUB:
-          return get(this.comment, ['data', 'user', 'avatar_url'])
-        case AvatarEnum.GRAVATAR:
-          return gravatarUrlIdenticon(this.login)
-        default:
-          return undefined
-      }
-    },
-    htmlUrl () {
-      return get(this.comment, ['data', 'html_url'])
-    },
-    gThemeClass () {
-      return this.$vuetify.theme.current.dark ? 'g-theme-dark' : 'g-theme-light'
-    },
+  setup (props) {
+    const { comment } = toRefs(props)
+    const theme = useTheme()
+
+    const commentHtml = computed(() => {
+      return transformHtml(get(comment.value, ['data', 'body'], ''))
+    })
+
+    const login = computed(() => {
+      return get(comment.value, ['data', 'user', 'login'])
+    })
+
+    const createdAt = computed(() => {
+      return get(comment.value, ['metadata', 'created_at'])
+    })
+
+    const githubAvatarUrl = computed(() => {
+      return get(comment.value, ['data', 'user', 'avatar_url'])
+    })
+
+    const htmlUrl = computed(() => {
+      return get(comment.value, ['data', 'html_url'])
+    })
+
+    const gThemeClass = computed(() => {
+      return theme.current.value.dark ? 'g-theme-dark' : 'g-theme-light'
+    })
+
+    return {
+      commentHtml,
+      login,
+      createdAt,
+      githubAvatarUrl,
+      htmlUrl,
+      gThemeClass,
+    }
   },
 }
 </script>
