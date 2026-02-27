@@ -193,7 +193,7 @@ describe('composables', () => {
     })
 
     describe('#useKubernetesVersionExpiration', () => {
-      it('should be info level (patch available, auto update enabled))', () => {
+      it('should be info level (patch available, auto update enabled)', () => {
         const { useKubernetesVersionExpiration } = useKubernetesVersions(cloudProfile)
         const k8sVersion = ref(unclassified164VersionWithExpiration.version)
         const k8sAutoPatch = ref(true)
@@ -203,10 +203,14 @@ describe('composables', () => {
           isExpired: false,
           isValidTerminationDate: true,
           severity: 'info',
+          version: unclassified164VersionWithExpiration.version,
+          regularUpdate: true,
+          forcedUpdate: false,
+          noUpdate: false,
         })
       })
 
-      it('should be warning level (patch available, auto update enabled, expiration warning))', () => {
+      it('should be warning level (patch available, auto update enabled, expiration warning)', () => {
         const { useKubernetesVersionExpiration } = useKubernetesVersions(cloudProfile)
         const k8sVersion = ref(supported162VersionWithExpirationWarning.version)
         const k8sAutoPatch = ref(true)
@@ -216,10 +220,14 @@ describe('composables', () => {
           isExpired: false,
           isValidTerminationDate: true,
           severity: 'warning',
+          version: supported162VersionWithExpirationWarning.version,
+          regularUpdate: false,
+          forcedUpdate: true,
+          noUpdate: false,
         })
       })
 
-      it('should be warning level (patch available, auto update disabled))', () => {
+      it('should be warning level (patch available, auto update disabled)', () => {
         const { useKubernetesVersionExpiration } = useKubernetesVersions(cloudProfile)
         const k8sVersion = ref(supported162VersionWithExpirationWarning.version)
         const k8sAutoPatch = ref(false)
@@ -229,10 +237,14 @@ describe('composables', () => {
           isExpired: false,
           isValidTerminationDate: true,
           severity: 'warning',
+          version: supported162VersionWithExpirationWarning.version,
+          regularUpdate: false,
+          forcedUpdate: true,
+          noUpdate: false,
         })
       })
 
-      it('should be warning level (update available, auto update enabled / disabled))', () => {
+      it('should be warning level (update available, auto update enabled / disabled)', () => {
         const { useKubernetesVersionExpiration } = useKubernetesVersions(cloudProfile)
         const k8sVersion = ref(supported17VersionWithExpirationWarning.version)
         let k8sAutoPatch = ref(true)
@@ -242,6 +254,10 @@ describe('composables', () => {
           isExpired: false,
           isValidTerminationDate: true,
           severity: 'warning',
+          version: supported17VersionWithExpirationWarning.version,
+          regularUpdate: false,
+          forcedUpdate: true,
+          noUpdate: false,
         })
 
         k8sAutoPatch = ref(false)
@@ -251,10 +267,14 @@ describe('composables', () => {
           isExpired: false,
           isValidTerminationDate: true,
           severity: 'warning',
+          version: supported17VersionWithExpirationWarning.version,
+          regularUpdate: false,
+          forcedUpdate: true,
+          noUpdate: false,
         })
       })
 
-      it('should be error level (only deprecated newer version available))', () => {
+      it('should be error level (only deprecated newer version available)', () => {
         const { useKubernetesVersionExpiration } = useKubernetesVersions(cloudProfile)
         const k8sVersion = ref(supported18VersionWithExpirationWarning.version)
         const k8sAutoPatch = ref(false)
@@ -264,10 +284,14 @@ describe('composables', () => {
           isExpired: false,
           isValidTerminationDate: true,
           severity: 'error',
+          version: supported18VersionWithExpirationWarning.version,
+          regularUpdate: false,
+          forcedUpdate: false,
+          noUpdate: true,
         })
       })
 
-      it('should not have warning (version not expired))', () => {
+      it('should not have warning (version not expired)', () => {
         const { useKubernetesVersionExpiration } = useKubernetesVersions(cloudProfile)
         const k8sVersion = ref(unclassified164VersionWithExpiration.version)
         const k8sAutoPatch = ref(false)
@@ -285,10 +309,14 @@ describe('composables', () => {
           isExpired: false,
           isValidTerminationDate: true,
           severity: 'info',
+          version: unclassified164VersionWithExpiration.version,
+          regularUpdate: true,
+          forcedUpdate: false,
+          noUpdate: false,
         })
       })
 
-      it('should not have warning (deprecated version has no expiration))', () => {
+      it('should not have warning (deprecated version has no expiration)', () => {
         const { useKubernetesVersionExpiration } = useKubernetesVersions(cloudProfile)
         const k8sVersion = ref(deprecatedOldest16Version.version)
         const k8sAutoPatch = ref(false)
@@ -306,6 +334,10 @@ describe('composables', () => {
           isExpired: false,
           isValidTerminationDate: true,
           severity: 'warning',
+          version: deprecated14Version.version,
+          regularUpdate: false,
+          forcedUpdate: true,
+          noUpdate: false,
         })
       })
 
@@ -319,6 +351,10 @@ describe('composables', () => {
           isExpired: true,
           isValidTerminationDate: false,
           severity: 'warning',
+          version: expiredVersion.version,
+          regularUpdate: false,
+          forcedUpdate: true,
+          noUpdate: false,
         })
       })
     })

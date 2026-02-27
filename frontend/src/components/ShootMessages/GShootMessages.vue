@@ -208,6 +208,10 @@ const k8sMessage = computed(() => {
     isValidTerminationDate,
     severity,
     isExpired,
+    version,
+    regularUpdate,
+    forcedUpdate,
+    noUpdate,
   } = k8sExpiration.value
   return [{
     key: 'k8sWarning',
@@ -218,8 +222,11 @@ const k8sMessage = computed(() => {
       props: {
         expirationDate,
         isValidTerminationDate,
-        severity,
         isExpired,
+        version,
+        regularUpdate,
+        forcedUpdate,
+        noUpdate,
       },
     },
   }]
@@ -242,6 +249,9 @@ const machineImageMessages = computed(() => {
       workerName,
       severity,
       supportedVersionAvailable,
+      regularUpdate,
+      forcedUpdate,
+      noUpdate,
     } = workerGroup
     return {
       key: `image_${workerName}_${name}`,
@@ -253,7 +263,9 @@ const machineImageMessages = computed(() => {
           expirationDate,
           isValidTerminationDate,
           isExpired,
-          severity,
+          regularUpdate,
+          forcedUpdate,
+          noUpdate,
           name,
           workerName,
           version,

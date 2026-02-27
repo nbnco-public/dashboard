@@ -18,6 +18,7 @@ import {
 
 import {
   isValidTerminationDate,
+  getVersionExpirationWarning,
   UNKNOWN_EXPIRED_TIMESTAMP,
 } from '@/utils/index.js'
 
@@ -135,30 +136,12 @@ export function useKubernetesVersions (cloudProfile) {
    * @throws {Error} If k8sVersion or k8sAutoPatch are not refs
    */
   function useKubernetesVersionExpiration (k8sVersion, k8sAutoPatch) {
-    if (!isRef(k8sVersion) && !isRef(k8sAutoPatch)) {
+    if (!isRef(k8sVersion) || !isRef(k8sAutoPatch)) {
       throw Error('k8sVersion and k8sAutoPatch must be a ref!')
     }
 
     const patchAvailable = useKubernetesVersionIsNotLatestPatch(k8sVersion)
 
-    function getVersionExpirationWarningSeverity (options) {
-      const {
-        isExpirationWarning,
-        autoPatchEnabled,
-        updateAvailable,
-        autoUpdatePossible,
-      } = options
-      const autoPatchEnabledAndPossible = autoPatchEnabled && autoUpdatePossible
-      if (!isExpirationWarning) {
-        return autoPatchEnabledAndPossible
-          ? 'info'
-          : undefined
-      }
-      if (!updateAvailable) {
-        return 'error'
-      }
-      return 'warning'
-    }
     function kubernetesVersionUpdatePathAvailable () {
       if (patchAvailable.value) {
         return true
@@ -194,28 +177,33 @@ export function useKubernetesVersions (cloudProfile) {
           version: k8sVersion.value,
           expirationDate: UNKNOWN_EXPIRED_TIMESTAMP,
           isValidTerminationDate: false,
-          severity: 'warning',
+          isExpired: true,
+          severity: 'warning', // we treat unknown versions as expiring soon to trigger attention and investigation
+          regularUpdate: false,
+          forcedUpdate: true, // we treat it as expired so update will be enforced
+          noUpdate: false,
         }
       }
 
       const updatePathAvailable = kubernetesVersionUpdatePathAvailable()
 
-      const severity = getVersionExpirationWarningSeverity({
+      const expirationWarning = getVersionExpirationWarning({
         isExpirationWarning: version.isExpirationWarning,
         autoPatchEnabled: k8sAutoPatch.value,
         updateAvailable: updatePathAvailable,
         autoUpdatePossible: patchAvailable.value,
       })
 
-      if (!severity) {
+      if (!expirationWarning) {
         return undefined
       }
 
       return {
+        version: version.version,
         expirationDate: version.expirationDate,
-        isExpired: version.isExpired,
         isValidTerminationDate: isValidTerminationDate(version.expirationDate),
-        severity,
+        isExpired: version.isExpired,
+        ...expirationWarning,
       }
     })
   }

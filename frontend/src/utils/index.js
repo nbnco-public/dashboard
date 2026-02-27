@@ -641,6 +641,14 @@ const allowedSemverDiffs = {
 }
 
 export function machineImageHasUpdate (machineImage, machineImages) {
+  return some(machineImages, ({ version, vendorName, isSupported }) => {
+    return isSupported &&
+      machineImage.vendorName === vendorName &&
+      semver.gt(version, machineImage.version)
+  })
+}
+
+export function machineImageHasUpdateForAutoUpdateStrategy (machineImage, machineImages) {
   let { updateStrategy } = machineImage
   if (!Object.keys(allowedSemverDiffs).includes(updateStrategy)) {
     updateStrategy = 'major'
@@ -656,6 +664,37 @@ export function machineImageHasUpdate (machineImage, machineImages) {
 export function machineVendorHasSupportedVersion (machineImage, machineImages) {
   const { vendorName, isSupported } = machineImage
   return some(machineImages, { vendorName, isSupported })
+}
+
+export function getVersionExpirationWarning ({
+  isExpirationWarning,
+  autoPatchEnabled,
+  updateAvailable,
+  autoUpdatePossible,
+}) {
+  const autoPatchEnabledAndPossible =
+    autoPatchEnabled && autoUpdatePossible
+
+  if (!isExpirationWarning && !autoPatchEnabledAndPossible) {
+    return undefined
+  }
+
+  const noUpdate = isExpirationWarning && !updateAvailable
+  const forcedUpdate = isExpirationWarning && updateAvailable
+  const regularUpdate = !isExpirationWarning
+
+  const severity = noUpdate
+    ? 'error'
+    : forcedUpdate
+      ? 'warning'
+      : 'info'
+
+  return {
+    severity,
+    regularUpdate,
+    forcedUpdate,
+    noUpdate,
+  }
 }
 
 export const UNKNOWN_EXPIRED_TIMESTAMP = '1970-01-01T00:00:00Z'
